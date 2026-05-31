@@ -1,0 +1,41 @@
+[package]
+name = "reverie"
+version = "0.1.0"
+edition = "2024"
+
+[profile.release]
+opt-level = "s"
+strip = true
+
+[dependencies]
+actson = "2.1.0"
+async-trait = "0.1.89"
+dashmap = "6.2.1"
+eventsource-stream = "0.2.3"
+fjall = "3.1.4"
+futures-core = "0.3.32"
+futures-util = { version = "0.3.32", default-features = false, features = ["std"] }
+http-body-util = "0.1.3"
+hyper = { version = "1.10.1", default-features = false }
+hyper-rustls = { version = "0.27.3", default-features = false, features = ["native-tokio", "http1", "http2", "ring", "tls12"] }
+hyper-util = { version = "0.1.20", default-features = false, features = ["client", "http1", "http2", "tokio", "client-legacy"] }
+nu-ansi-term = "0.50.3"
+rootcause = "0.12.1"
+rootcause-tracing = "0.12.1"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = { version = "1.0.150", features = ["preserve_order"] }
+thiserror = "2.0.18"
+time = { version = "0.3.47", default-features = false, features = ["formatting", "serde"] }
+tokio = { version = "1.52.3", features = ["macros", "rt", "rt-multi-thread", "fs", "net", "signal", "sync"] }
+toml = { version = "1.1.2", default-features = false, features = ["parse", "serde", "std"] }
+tower = { version = "0.5.3", features = ["filter", "timeout", "tracing", "util"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+twilight-gateway = { version = "0.17.1", default-features = false, features = ["rustls-native-roots"], optional = true }
+twilight-http = { version = "0.17.1", default-features = false, features = ["rustls-native-roots"], optional = true }
+twilight-model = { version = "0.17.1", optional = true }
+uuid = { version = "1.23.2", features = ["serde", "v7"] }
+
+[features]
+default = ["discord"]
+discord = ["dep:twilight-gateway", "dep:twilight-http", "dep:twilight-model"]

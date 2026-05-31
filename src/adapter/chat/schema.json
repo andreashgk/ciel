@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "name": "DiscordBotResponse",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "reasoning": {
+        "type": "string",
+        "description": "Internal thought process for why the bot should or should not respond to the latest message(s)."
+      },
+      "should_respond": {
+        "type": "boolean",
+        "description": "Determines if the bot will send a response at all. If false, no messages have to be specified. This should be used when the conversation has ended, no one is speaking to the bot, or you feel you dont need to answer."
+      },
+      "messages": {
+        "type": "array",
+        "description": "List of messages to send in the channel.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "reasoning": {
+              "type": "string",
+              "description": "Internal thought process for formulating this specific message."
+            },
+            "message": {
+              "type": "string",
+              "description": "The actual message content to be sent."
+            }
+          },
+          "required": ["reasoning", "message"]
+        }
+      }
+    },
+    "required": ["reasoning", "should_respond", "messages"]
+  }
+}
