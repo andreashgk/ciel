@@ -283,6 +283,7 @@ impl ProviderImpl for OpenAI {
                                 index: channel_index,
                                 tool_call_id: tool_id.to_string(),
                                 name: name.to_string(),
+                                handled: false,
                             });
 
                             if let Some(args) = arguments {

@@ -97,6 +97,10 @@ pub fn parse_token_stream(
                         },
                     }
                 },
+                ResponseEvent::ToolResult(_event) => {
+                    // TODO: support passing along tool output from this layer
+                    continue;
+                },
             }
         }
 

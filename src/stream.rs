@@ -19,6 +19,8 @@ pub enum ResponseEvent {
     Message(MessageEvent),
     /// The LLM is calling a tool.
     Tool(ToolEvent),
+    /// A tool call is being executed and the result is being streamed.
+    ToolResult(ToolResultEvent),
 }
 
 /// All events related to response messages created by the LLM.
@@ -40,10 +42,28 @@ pub enum ToolEvent {
         index: ChannelIndex,
         tool_call_id: String,
         name: String,
+        /// If true, this tool call is being handled already (by middleware for example). Tool
+        /// output will follow in the same stream.
+        handled: bool,
     },
     /// A chunk to append to a specific tool call's arguments.
     Chunk { index: ChannelIndex, delta: String },
     /// Indicates the LLM has finished generating the tool arguments.
+    Complete { index: ChannelIndex },
+}
+
+/// All events related to a tool's output.
+#[derive(Debug, Clone)]
+pub enum ToolResultEvent {
+    /// Sent when the tool output starts being streamed.
+    Start {
+        index: ChannelIndex,
+        tool_call_id: String,
+        name: String,
+    },
+    /// Sent for each chunk of the tool output.
+    Chunk { index: ChannelIndex, delta: String },
+    /// Sent when the tool output is complete.
     Complete { index: ChannelIndex },
 }
 
