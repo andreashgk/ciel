@@ -3,6 +3,7 @@ use std::fmt::Debug;
 use std::fmt::Display;
 use std::io;
 use std::ops::Not;
+use std::sync::Arc;
 
 use async_stream::try_stream;
 use async_trait::async_trait;
@@ -25,7 +26,6 @@ use crate::provider;
 use crate::provider::LlmMessage;
 use crate::provider::ProviderError;
 use crate::provider::ProviderImpl;
-use crate::provider::Tool;
 use crate::provider::openai::models::Error;
 use crate::provider::openai::models::Event;
 use crate::provider::openai::models::FunctionDelta;
@@ -42,6 +42,7 @@ use crate::stream::MessageEvent;
 use crate::stream::ResponseEvent;
 use crate::stream::ResponseStream;
 use crate::stream::ToolEvent;
+use crate::tool::ToolInfo;
 use crate::utils::secret::Secret;
 
 mod models;
@@ -82,7 +83,7 @@ impl ProviderImpl for OpenAI {
         model: &str,
         messages: &[LlmMessage],
         tool_mode: super::ToolMode,
-        tools: &[Tool],
+        tools: &[Arc<ToolInfo>],
         schema: Option<&serde_json::Value>,
     ) -> provider::Result<ResponseStream> {
         let url = format!("{}/chat/completions", self.config.base_url);
@@ -113,8 +114,8 @@ impl ProviderImpl for OpenAI {
                 ToolDefinition::Function(FunctionTool {
                     name: &tool.name,
                     description: Some(&*tool.description).filter(|s| s.is_empty()),
-                    parameters: tool.parameters.as_deref(),
-                    strict: tool.parameters.is_some(),
+                    parameters: tool.arguments.as_ref(),
+                    strict: tool.arguments.is_some(),
                 })
             })
             .collect::<Vec<_>>();

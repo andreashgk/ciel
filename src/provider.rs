@@ -14,6 +14,7 @@ use tracing::instrument;
 use crate::config::Config;
 use crate::config::ConfigError;
 use crate::stream::ResponseStream;
+use crate::tool::ToolInfo;
 
 pub mod openai;
 
@@ -24,7 +25,7 @@ pub trait ProviderImpl: Display + Debug + Send + Sync {
         model: &str,
         messages: &[LlmMessage],
         tool_mode: ToolMode,
-        tools: &[Tool],
+        tools: &[Arc<ToolInfo>],
         schema: Option<&Value>,
     ) -> Result<ResponseStream>;
 }
@@ -46,7 +47,7 @@ impl Provider {
         model: &str,
         messages: &[LlmMessage],
         tool_mode: ToolMode,
-        tools: &[Tool],
+        tools: &[Arc<ToolInfo>],
         schema: Option<&Value>,
     ) -> Result<ResponseStream> {
         self.0
@@ -74,15 +75,6 @@ pub enum ToolMode {
     None,
     Auto,
     Required,
-}
-
-#[derive(Debug, Clone)]
-pub struct Tool {
-    pub name: String,
-    /// Describes what the tool does. Leave empty to omit this field.
-    pub description: String,
-    /// Optionally define a schema to allow parameters for this function call.
-    pub parameters: Option<Arc<Value>>,
 }
 
 pub type Result<V> = std::result::Result<V, ProviderError>;

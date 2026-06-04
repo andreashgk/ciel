@@ -82,6 +82,7 @@ impl Cli {
                         .call(ChatRequest {
                             system_prompt,
                             messages: branch_clone,
+                            tools: Vec::new(),
                         })
                         .await
                 })

@@ -15,9 +15,9 @@ use crate::provider::LlmMessage;
 use crate::provider::Provider;
 use crate::provider::ProviderCreateFn;
 use crate::provider::ProviderError;
-use crate::provider::Tool;
 use crate::provider::ToolMode;
 use crate::stream::ResponseStream;
+use crate::tool::ToolInfo;
 
 #[derive(Default, Clone)]
 pub struct Providers {
@@ -70,7 +70,7 @@ pub struct ModelRequest {
 
 pub struct Request {
     pub messages: Vec<LlmMessage>,
-    pub tools: Vec<Tool>,
+    pub tools: Vec<Arc<ToolInfo>>,
     pub tool_mode: ToolMode,
     pub schema: Option<Arc<serde_json::Value>>,
 }

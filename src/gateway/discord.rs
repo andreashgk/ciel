@@ -222,6 +222,7 @@ async fn channel_worker(
             .call(ChatRequest {
                 system_prompt: system_prompt.clone(),
                 messages: branch.clone(),
+                tools: Vec::new(),
             })
             .await?;
 

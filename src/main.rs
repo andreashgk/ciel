@@ -38,6 +38,7 @@ pub mod provider;
 pub mod providers;
 pub mod session;
 pub mod stream;
+pub mod tool;
 pub mod utils;
 
 #[tokio::main]

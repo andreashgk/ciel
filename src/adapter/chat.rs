@@ -24,6 +24,7 @@ use crate::providers::Request;
 use crate::session::Branch;
 use crate::session::UserInfo;
 use crate::stream::ResponseEvent;
+use crate::tool::ToolInfo;
 
 /// Chat layer on top of an LLM service, oriented for conversational text chats.
 ///
@@ -57,6 +58,7 @@ impl<S> Default for ChatAdapterLayer<S> {
 pub struct ChatRequest {
     pub system_prompt: String,
     pub messages: Branch,
+    pub tools: Vec<ToolInfo>,
 }
 
 pub type ChatStream = BoxStream<'static, io::Result<ResponseEvent>>;
@@ -151,7 +153,11 @@ where
                 messages,
                 schema: Some(schema.clone()),
                 tools: Vec::new(),
-                tool_mode: provider::ToolMode::None,
+                tool_mode: if req.tools.is_empty() {
+                    provider::ToolMode::None
+                } else {
+                    provider::ToolMode::Required
+                },
             };
 
             Ok(request)
