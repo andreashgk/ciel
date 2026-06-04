@@ -18,7 +18,10 @@ pub struct Request<'a> {
     pub response_format: Option<ResponseFormat<'a>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<&'a str>,
-    // TODO: tools
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    pub tools: &'a [ToolDefinition<'a>],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<ToolChoice>,
 }
 
 #[derive(Debug, Serialize)]
@@ -47,6 +50,36 @@ pub struct ResponseFormat<'a> {
     pub json_schema: Option<&'a Value>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(tag = "type", content = "function", rename_all = "lowercase")]
+pub enum ToolDefinition<'a> {
+    Function(FunctionTool<'a>),
+}
+
+#[derive(Debug, Serialize)]
+pub struct FunctionTool<'a> {
+    pub name: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parameters: Option<&'a Value>,
+    pub strict: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum ToolChoice {
+    Mode(ToolChoiceMode),
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ToolChoiceMode {
+    None,
+    Auto,
+    Required,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct Event {
     pub id: String,
@@ -63,8 +96,23 @@ pub struct EventChoice {
 
 #[derive(Debug, Deserialize)]
 pub struct EventDelta {
+    pub reasoning_content: Option<String>,
     pub content: Option<String>,
     pub refusal: Option<String>,
+    pub tool_calls: Option<Vec<ToolCallDelta>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ToolCallDelta {
+    pub index: i64,
+    pub id: Option<String>,
+    pub function: Option<FunctionDelta>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FunctionDelta {
+    pub arguments: Option<String>,
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

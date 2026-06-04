@@ -26,6 +26,8 @@ pub trait ProviderImpl: Display + Debug + Send + Sync {
         &self,
         model: &str,
         messages: &[LlmMessage],
+        tool_mode: ToolMode,
+        tools: &[Tool],
         schema: Option<&Value>,
     ) -> Result<TokenStream>;
 }
@@ -46,10 +48,12 @@ impl Provider {
         &self,
         model: &str,
         messages: &[LlmMessage],
+        tool_mode: ToolMode,
+        tools: &[Tool],
         schema: Option<&Value>,
     ) -> Result<TokenStream> {
         self.0
-            .chat(model, messages, schema)
+            .chat(model, messages, tool_mode, tools, schema)
             .await
             .map(|s| s.instrumented())
     }
@@ -68,8 +72,43 @@ pub enum Role {
     User,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToolMode {
+    None,
+    Auto,
+    Required,
+}
+
+#[derive(Debug, Clone)]
+pub struct Tool {
+    pub name: String,
+    /// Describes what the tool does. Leave empty to omit this field.
+    pub description: String,
+    /// Optionally define a schema to allow parameters for this function call.
+    pub parameters: Option<Arc<Value>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Token {
+    Reasoning(String),
+    Response(String),
+    Tool(ToolToken),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToolToken {
+    Start(ToolInfo),
+    Arguments(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolInfo {
+    pub id: String,
+    pub name: String,
+}
+
 pub struct TokenStream {
-    inner: BoxStream<'static, io::Result<String>>,
+    inner: BoxStream<'static, io::Result<Token>>,
     span: Span,
 }
 
@@ -79,7 +118,7 @@ impl TokenStream {
     /// Wraps an existing stream.
     pub fn new<S>(stream: S) -> Self
     where
-        S: Stream<Item = io::Result<String>> + Send + 'static,
+        S: Stream<Item = io::Result<Token>> + Send + 'static,
     {
         Self {
             inner: stream.boxed(),
@@ -94,7 +133,7 @@ impl TokenStream {
 }
 
 impl Stream for TokenStream {
-    type Item = io::Result<String>;
+    type Item = io::Result<Token>;
 
     fn poll_next(
         self: std::pin::Pin<&mut Self>,

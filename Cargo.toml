@@ -9,6 +9,7 @@ strip = true
 
 [dependencies]
 actson = "2.1.0"
+async-stream = "0.3.6"
 async-trait = "0.1.89"
 dashmap = "6.2.1"
 eventsource-stream = "0.2.3"

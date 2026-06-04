@@ -16,6 +16,8 @@ use crate::provider::Provider;
 use crate::provider::ProviderCreateFn;
 use crate::provider::ProviderError;
 use crate::provider::TokenStream;
+use crate::provider::Tool;
+use crate::provider::ToolMode;
 
 #[derive(Default, Clone)]
 pub struct Providers {
@@ -68,6 +70,8 @@ pub struct ModelRequest {
 
 pub struct Request {
     pub messages: Vec<LlmMessage>,
+    pub tools: Vec<Tool>,
+    pub tool_mode: ToolMode,
     pub schema: Option<Arc<serde_json::Value>>,
 }
 
@@ -121,6 +125,8 @@ async fn handle(provider: Option<Provider>, req: ProviderRequest) -> provider::R
         .chat(
             &req.model,
             &req.request.messages,
+            req.request.tool_mode,
+            &req.request.tools,
             req.request.schema.as_deref(),
         )
         .await

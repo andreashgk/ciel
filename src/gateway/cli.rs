@@ -90,6 +90,10 @@ impl Cli {
                 .context("failed to get next event")?
             {
                 match response_event {
+                    AssistantEvent::Reasoning(_) => {
+                        // TODO: display reasoning
+                        continue;
+                    }
                     AssistantEvent::Typing => {
                         // TODO: show typing in the terminal
                         continue;

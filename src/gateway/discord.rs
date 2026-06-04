@@ -230,6 +230,9 @@ async fn channel_worker(
         // TODO: properly handle this error by giving some feedback in the channel
         while let Some(response_event) = response_stream.try_next().await? {
             match response_event {
+                AssistantEvent::Reasoning(_) => {
+                    continue;
+                }
                 AssistantEvent::Typing => {
                     // The typing trigger is not as important so it's okay to keep going after
                     // these errors.

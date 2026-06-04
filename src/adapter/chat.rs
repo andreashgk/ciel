@@ -14,11 +14,12 @@ use time::format_description::parse_owned;
 use tower::Layer;
 use tower::Service;
 
-use crate::adapter::chat::stream::parse_response_stream;
+use crate::adapter::chat::stream::parse_token_stream;
 use crate::provider;
 use crate::provider::LlmMessage;
 use crate::provider::ProviderError;
 use crate::provider::Role;
+use crate::provider::Token;
 use crate::providers;
 use crate::providers::Request;
 use crate::session::Branch;
@@ -61,6 +62,8 @@ pub struct ChatRequest {
 /// Events returned by a service wrapped with [ChatAdapterLayer].
 #[derive(Debug)]
 pub enum AssistantEvent {
+    /// Optional reasoning done by the LLM.
+    Reasoning(String),
     /// Indicates the LLM has decided to respond and is currently generating its next response. Also
     /// gets sent when the LLM is generating any followup responses.
     Typing,
@@ -73,7 +76,7 @@ pub type ChatStream = BoxStream<'static, io::Result<AssistantEvent>>;
 impl<S, TokenStream> Layer<S> for ChatAdapterLayer<S>
 where
     S: Service<providers::Request, Response = TokenStream, Error = ProviderError>,
-    TokenStream: Stream<Item = io::Result<String>>,
+    TokenStream: Stream<Item = io::Result<Token>>,
 {
     type Service = ChatAdapterService<S>;
 
@@ -98,7 +101,7 @@ impl<S, TokenStream> Service<ChatRequest> for ChatAdapterService<S>
 where
     S: Service<providers::Request, Response = TokenStream, Error = ProviderError>,
     S::Future: Send + 'static,
-    TokenStream: Stream<Item = io::Result<String>> + Send + 'static,
+    TokenStream: Stream<Item = io::Result<Token>> + Send + 'static,
 {
     type Response = ChatStream;
     type Error = ProviderError;
@@ -150,7 +153,7 @@ where
             let schema_str = serde_json::to_string(schema.as_ref()).map_err(io::Error::other)?;
             let mut messages = vec![LlmMessage {
                 role: Role::System,
-                message: wrap_system_prompt(&schema_str, &req.system_prompt),
+                message: wrap_system_prompt(false, &schema_str, &req.system_prompt),
             }];
             for msg in history {
                 messages.push(msg);
@@ -159,6 +162,8 @@ where
             let request = Request {
                 messages,
                 schema: Some(schema.clone()),
+                tools: Vec::new(),
+                tool_mode: provider::ToolMode::None,
             };
 
             Ok(request)
@@ -170,7 +175,7 @@ where
         async move {
             let response_stream = inner_future?.await?;
             // TODO: apply instrument to this stream, maybe?
-            let response_stream = parse_response_stream(response_stream);
+            let response_stream = parse_token_stream(false, response_stream);
 
             Ok(response_stream.boxed())
         }
@@ -186,7 +191,12 @@ struct UserMessage {
     content: String,
 }
 
-fn wrap_system_prompt(schema_str: &str, original_prompt: &str) -> String {
-    let prompt = include_str!("chat/prompt.md").replace("$SCHEMA", schema_str);
+fn wrap_system_prompt(tools: bool, schema_str: &str, original_prompt: &str) -> String {
+    let prompt = if tools {
+        include_str!("chat/prompt_tools.md")
+    } else {
+        include_str!("chat/prompt_notools.md")
+    };
+    let prompt = prompt.replace("$SCHEMA", schema_str);
     format!("{original_prompt}\n{prompt}")
 }

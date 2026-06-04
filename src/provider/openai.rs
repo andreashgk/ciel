@@ -1,10 +1,12 @@
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::io;
+use std::ops::Not;
 
+use async_stream::try_stream;
 use async_trait::async_trait;
 use eventsource_stream::Eventsource;
-use futures_util::StreamExt;
+use futures_util::TryStreamExt;
 use http_body_util::BodyExt;
 use hyper::Request;
 use hyper::Response;
@@ -22,12 +24,22 @@ use crate::provider;
 use crate::provider::LlmMessage;
 use crate::provider::ProviderError;
 use crate::provider::ProviderImpl;
+use crate::provider::Token;
 use crate::provider::TokenStream;
+use crate::provider::Tool;
+use crate::provider::ToolInfo;
+use crate::provider::ToolToken;
 use crate::provider::openai::models::Error;
 use crate::provider::openai::models::Event;
+use crate::provider::openai::models::FunctionDelta;
+use crate::provider::openai::models::FunctionTool;
 use crate::provider::openai::models::RequestMessage;
 use crate::provider::openai::models::ResponseFormat;
 use crate::provider::openai::models::StreamOptions;
+use crate::provider::openai::models::ToolCallDelta;
+use crate::provider::openai::models::ToolChoice;
+use crate::provider::openai::models::ToolChoiceMode;
+use crate::provider::openai::models::ToolDefinition;
 use crate::utils::secret::Secret;
 
 mod models;
@@ -67,6 +79,8 @@ impl ProviderImpl for OpenAI {
         &self,
         model: &str,
         messages: &[LlmMessage],
+        tool_mode: super::ToolMode,
+        tools: &[Tool],
         schema: Option<&serde_json::Value>,
     ) -> provider::Result<TokenStream> {
         let url = format!("{}/chat/completions", self.config.base_url);
@@ -91,6 +105,18 @@ impl ProviderImpl for OpenAI {
             })
             .collect::<Vec<_>>();
 
+        let tools = tools
+            .iter()
+            .map(|tool| {
+                ToolDefinition::Function(FunctionTool {
+                    name: &tool.name,
+                    description: Some(&*tool.description).filter(|s| s.is_empty()),
+                    parameters: tool.parameters.as_deref(),
+                    strict: tool.parameters.is_some(),
+                })
+            })
+            .collect::<Vec<_>>();
+
         let req = models::Request {
             messages: &messages,
             model,
@@ -104,7 +130,14 @@ impl ProviderImpl for OpenAI {
                 json_schema: Some(schema),
             }),
             reasoning_effort: None,
+            tools: &tools,
+            tool_choice: tools.is_empty().not().then_some(match tool_mode {
+                provider::ToolMode::None => ToolChoice::Mode(ToolChoiceMode::None),
+                provider::ToolMode::Auto => ToolChoice::Mode(ToolChoiceMode::Auto),
+                provider::ToolMode::Required => ToolChoice::Mode(ToolChoiceMode::Required),
+            }),
         };
+
         let body = match serde_json::to_string(&req) {
             Ok(v) => v,
             Err(error) => {
@@ -141,27 +174,81 @@ impl ProviderImpl for OpenAI {
             return Err(determine_error(res, model).await);
         }
 
-        let stream =
-            res.into_body()
-                .into_data_stream()
-                .eventsource()
-                .filter_map(|item| async move {
-                    item.map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
-                        .and_then(|item| {
-                            if item.data == "[DONE]" {
-                                return Ok(None);
-                            }
+        let mut stream = res
+            .into_body()
+            .into_data_stream()
+            .eventsource()
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err));
+        let stream = try_stream! {
+            while let Some(item) = stream.try_next().await? {
+                if item.data == "[DONE]" {
+                    return;
+                }
 
-                            let event: Event = match serde_json::from_str(&item.data) {
-                                Ok(v) => v,
-                                Err(err) => {
-                                    return Err(io::Error::new(io::ErrorKind::InvalidData, err));
-                                }
-                            };
-                            Ok(event.choices[0].delta.content.clone())
-                        })
-                        .transpose()
-                });
+                let event: Event = serde_json::from_str(&item.data)
+                    .map_err(|err| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("failed to parse event: {err}"),
+                        )
+                    })?;
+
+                if event.choices.is_empty() {
+                    continue;
+                }
+
+                // TODO: refusal
+                let choice = event.choices.first().ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "no choices present",
+                    )
+                })?;
+
+                if let Some(content) = &choice.delta.content {
+                    yield Token::Response(content.clone());
+                } else if let Some(reasoning) = &choice.delta.reasoning_content {
+                    yield Token::Response(reasoning.clone());
+                } else if let Some(tool) = &choice.delta.tool_calls {
+                    match &tool[0] {
+                        ToolCallDelta {
+                            id: Some(id),
+                            function:
+                                Some(FunctionDelta {
+                                    arguments,
+                                    name: Some(name),
+                                }),
+                            ..
+                        } => {
+                            yield Token::Tool(ToolToken::Start(ToolInfo {
+                                id: id.clone(),
+                                name: name.clone(),
+                            }));
+                            if let Some(args) = arguments {
+                                yield Token::Tool(ToolToken::Arguments(args.clone()));
+                            }
+                        },
+                        ToolCallDelta {
+                            function:
+                                Some(FunctionDelta {
+                                    arguments: Some(arguments),
+                                    ..
+                                }),
+                            ..
+                        } => yield Token::Tool(ToolToken::Arguments(
+                            arguments.clone(),
+                        )),
+                        _ => {
+                            Err(io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                "unexpected tool object",
+                            ))?;
+                        },
+                    }
+                }
+            }
+        };
+
         Ok(TokenStream::new(stream))
     }
 }
