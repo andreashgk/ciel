@@ -76,7 +76,7 @@ pub struct Usage {
 
 #[derive(Debug, Deserialize)]
 pub struct Error {
-    pub error_info: ErrorInfo,
+    pub error: ErrorInfo,
 }
 
 #[derive(Debug, Deserialize)]

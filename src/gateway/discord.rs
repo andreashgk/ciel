@@ -133,7 +133,7 @@ impl GatewayImpl for Discord {
                         http.clone(),
                     )
                     .map_err(|error| {
-                            error!(%error, "error while processing channel");
+                            error!("error while processing channel: {error}");
                     })
                     .instrument(span)
                     .in_current_span()

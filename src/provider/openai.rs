@@ -183,12 +183,13 @@ async fn determine_error(response: Response<Incoming>, model: &str) -> ProviderE
         .collect()
         .await
         .map(|body| {
-            serde_json::from_slice(&body.to_bytes()).inspect_err(|_err| {
-                error!("failed to parse error");
+            let b = &body.to_bytes();
+            serde_json::from_slice(b).inspect_err(|why| {
+                error!(%why, "failed to parse error");
             })
         })
-        .inspect_err(|_err| {
-            error!("failed to read response body");
+        .inspect_err(|why| {
+            error!(%why, "failed to read response body");
         });
 
     let body: Error = match body {
@@ -207,7 +208,7 @@ async fn determine_error(response: Response<Incoming>, model: &str) -> ProviderE
         }
     };
 
-    match body.error_info.code.as_str() {
+    match body.error.code.as_str() {
         "context_length_exceeded" => ProviderError::ContextExceeded,
         "invalid_api_key" => ProviderError::Unauthorized,
         "model_not_found" => ProviderError::ModelNotFound(model.to_string()),
@@ -219,7 +220,7 @@ async fn determine_error(response: Response<Incoming>, model: &str) -> ProviderE
             }
             ProviderError::IO(io::Error::other(format!(
                 "failed with unknown error: {}",
-                body.error_info.message
+                body.error.message
             )))
         }
     }
