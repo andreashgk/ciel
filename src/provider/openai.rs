@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::io;
@@ -24,11 +25,7 @@ use crate::provider;
 use crate::provider::LlmMessage;
 use crate::provider::ProviderError;
 use crate::provider::ProviderImpl;
-use crate::provider::Token;
-use crate::provider::TokenStream;
 use crate::provider::Tool;
-use crate::provider::ToolInfo;
-use crate::provider::ToolToken;
 use crate::provider::openai::models::Error;
 use crate::provider::openai::models::Event;
 use crate::provider::openai::models::FunctionDelta;
@@ -40,6 +37,11 @@ use crate::provider::openai::models::ToolCallDelta;
 use crate::provider::openai::models::ToolChoice;
 use crate::provider::openai::models::ToolChoiceMode;
 use crate::provider::openai::models::ToolDefinition;
+use crate::stream::ChannelIndex;
+use crate::stream::MessageEvent;
+use crate::stream::ResponseEvent;
+use crate::stream::ResponseStream;
+use crate::stream::ToolEvent;
 use crate::utils::secret::Secret;
 
 mod models;
@@ -82,7 +84,7 @@ impl ProviderImpl for OpenAI {
         tool_mode: super::ToolMode,
         tools: &[Tool],
         schema: Option<&serde_json::Value>,
-    ) -> provider::Result<TokenStream> {
+    ) -> provider::Result<ResponseStream> {
         let url = format!("{}/chat/completions", self.config.base_url);
         let url = url
             .parse::<hyper::Uri>()
@@ -179,6 +181,35 @@ impl ProviderImpl for OpenAI {
             .into_data_stream()
             .eventsource()
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err));
+
+        /// Used to map OpenAI streams to a ChannelIndex.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        enum StreamKey {
+            Message,
+            Tool(i64),
+        }
+
+        // Quick helper function to close all open channels. Returns a list of close events that
+        // need to be yielded.
+        let close_all = |streams: &mut HashMap<_, _>| {
+            let mut events = Vec::with_capacity(streams.len());
+            for (key, channel_index) in streams {
+                let ev = match key {
+                    StreamKey::Message => ResponseEvent::Message(MessageEvent::Complete {
+                        index: *channel_index,
+                    }),
+                    StreamKey::Tool(_) => ResponseEvent::Tool(ToolEvent::Complete {
+                        index: *channel_index,
+                    }),
+                };
+                events.push(ev);
+            }
+            events
+        };
+
+        let mut open_channels = HashMap::<StreamKey, ChannelIndex>::new();
+        let mut next_channel_id = 0;
+
         let stream = try_stream! {
             while let Some(item) = stream.try_next().await? {
                 if item.data == "[DONE]" {
@@ -205,39 +236,84 @@ impl ProviderImpl for OpenAI {
                     )
                 })?;
 
-                if let Some(content) = &choice.delta.content {
-                    yield Token::Response(content.clone());
-                } else if let Some(reasoning) = &choice.delta.reasoning_content {
-                    yield Token::Response(reasoning.clone());
+                if let Some(content) = &choice.delta.reasoning_content {
+                    yield ResponseEvent::Reasoning(content.clone());
+                } else if let Some(reasoning) = &choice.delta.content {
+                    let index = match open_channels.get(&StreamKey::Message) {
+                        Some(v) => *v,
+                        None => {
+                            for ev in close_all(&mut open_channels) {
+                                yield ev;
+                            }
+
+                            let id = next_channel_id;
+                            open_channels.insert(StreamKey::Message, id);
+
+                            yield ResponseEvent::Message(MessageEvent::Start { index: id });
+
+                            next_channel_id += 1;
+                            id
+                        },
+                    };
+
+                    yield ResponseEvent::Message(MessageEvent::Chunk {
+                        index,
+                        delta: reasoning.clone(),
+                    });
                 } else if let Some(tool) = &choice.delta.tool_calls {
                     match &tool[0] {
                         ToolCallDelta {
-                            id: Some(id),
+                            id: Some(tool_id),
+                            index: tool_index,
                             function:
                                 Some(FunctionDelta {
                                     arguments,
                                     name: Some(name),
                                 }),
-                            ..
                         } => {
-                            yield Token::Tool(ToolToken::Start(ToolInfo {
-                                id: id.clone(),
-                                name: name.clone(),
-                            }));
+                            for ev in close_all(&mut open_channels) {
+                                yield ev;
+                            }
+
+                            let channel_index = next_channel_id;
+                            open_channels.insert(StreamKey::Tool(*tool_index), channel_index);
+
+                            yield ResponseEvent::Tool(ToolEvent::Start {
+                                index: channel_index,
+                                tool_call_id: tool_id.to_string(),
+                                name: name.to_string(),
+                            });
+
                             if let Some(args) = arguments {
-                                yield Token::Tool(ToolToken::Arguments(args.clone()));
+                                yield ResponseEvent::Tool(ToolEvent::Chunk {
+                                    index: channel_index,
+                                    delta: args.to_string(),
+                                });
                             }
                         },
                         ToolCallDelta {
+                            index: tool_index,
                             function:
                                 Some(FunctionDelta {
                                     arguments: Some(arguments),
                                     ..
                                 }),
                             ..
-                        } => yield Token::Tool(ToolToken::Arguments(
-                            arguments.clone(),
-                        )),
+                        } => {
+                            let channel_index = *open_channels
+                                .get(&StreamKey::Tool(*tool_index))
+                                .ok_or_else(|| {
+                                    io::Error::new(
+                                        io::ErrorKind::InvalidData,
+                                        format!("unknown tool index {tool_index}"),
+                                    )
+                                })?;
+
+                            yield ResponseEvent::Tool(ToolEvent::Chunk {
+                                index: channel_index,
+                                delta: arguments.to_string(),
+                            });
+                        },
                         _ => {
                             Err(io::Error::new(
                                 io::ErrorKind::InvalidData,
@@ -247,9 +323,13 @@ impl ProviderImpl for OpenAI {
                     }
                 }
             }
+
+            for ev in close_all(&mut open_channels) {
+                yield ev;
+            }
         };
 
-        Ok(TokenStream::new(stream))
+        Ok(ResponseStream::new(stream))
     }
 }
 

@@ -1,4 +1,7 @@
+use std::collections::HashMap;
 use std::io;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 
 use actson::JsonEvent;
 use actson::JsonParser;
@@ -8,110 +11,108 @@ use futures_core::Stream;
 use futures_util::TryStreamExt;
 use tokio::pin;
 
-use crate::adapter::chat::AssistantEvent;
-use crate::provider::Token;
-use crate::provider::ToolToken;
+use crate::stream::ChannelIndex;
+use crate::stream::MessageEvent;
+use crate::stream::ResponseEvent;
+use crate::stream::ToolEvent;
 
 pub fn parse_token_stream(
     tools: bool,
-    stream: impl Stream<Item = io::Result<Token>>,
-) -> impl Stream<Item = io::Result<AssistantEvent>> {
+    stream: impl Stream<Item = io::Result<ResponseEvent>>,
+) -> impl Stream<Item = io::Result<ResponseEvent>> {
     try_stream! {
-        let mut state = ChatState::None;
+        // Maps old(!!) channel index to a response parser state.
+        let mut response_states = HashMap::<ChannelIndex, ResponseParser>::new();
+        // Incremental counter for new indices. Using an atomic value was necessary since something
+        // like refcell does not work here (not Sync).
+        let next_channel_id = AtomicUsize::new(0);
 
         pin!(stream);
-        while let Some(token) = stream.try_next().await? {
-            match token {
-                Token::Reasoning(reasoning) => {
-                    yield AssistantEvent::Reasoning(reasoning);
+        while let Some(event) = stream.try_next().await? {
+            match event {
+                ResponseEvent::Reasoning(reasoning) => {
+                    yield ResponseEvent::Reasoning(reasoning);
                 },
-                Token::Response(response) => {
+                ResponseEvent::Message(event) => {
                     if tools {
                         continue;
                     }
-                    match &mut state {
-                        ChatState::None => {
-                            let mut parser = ResponseParser::default();
-                            parser.push(&response);
 
-                            while let Some(next) = parser.next()? {
-                                yield next;
-                            }
-
-                            state = ChatState::Response(parser);
+                    match event {
+                        MessageEvent::Start { index } => {
+                            response_states.insert(index, ResponseParser::new(&next_channel_id));
                         },
-                        ChatState::Response(response_parser) => {
-                            response_parser.push(&response);
+                        MessageEvent::Chunk { index, delta } => {
+                            let state = response_states
+                                .get_mut(&index)
+                                .ok_or_else(|| io::Error::other("unknown channel"))?;
 
-                            while let Some(next) = response_parser.next()? {
+                            state.push(&delta);
+                            while let Some(next) = state.next()? {
                                 yield next;
                             }
+                        },
+                        MessageEvent::Complete { index } => {
+                            let state = response_states
+                                .get_mut(&index)
+                                .ok_or_else(|| io::Error::other("unknown channel"))?;
+
+                            state.done()?;
+                            while let Some(next) = state.next()? {
+                                yield next;
+                            }
+                            response_states.remove(&index);
                         },
                     }
                 },
-                Token::Tool(ToolToken::Start(_t)) => {
+                ResponseEvent::Tool(event) => {
                     if !tools {
                         continue;
                     }
 
-                    match state {
-                        ChatState::None => {},
-                        ChatState::Response(mut response_parser) => {
-                            response_parser.done()?;
+                    match event {
+                        ToolEvent::Start { index, .. } => {
+                            response_states.insert(index, ResponseParser::new(&next_channel_id));
+                        },
+                        ToolEvent::Chunk { index, delta } => {
+                            let state = response_states
+                                .get_mut(&index)
+                                .ok_or_else(|| io::Error::other("unknown channel"))?;
 
-                            while let Some(next) = response_parser.next()? {
+                            state.push(&delta);
+                            while let Some(next) = state.next()? {
                                 yield next;
                             }
                         },
-                    }
+                        ToolEvent::Complete { index } => {
+                            let state = response_states
+                                .get_mut(&index)
+                                .ok_or_else(|| io::Error::other("unknown channel"))?;
 
-                    // TODO: other tools..
-                    let parser = ResponseParser::default();
-                    state = ChatState::Response(parser);
-
-                },
-                Token::Tool(ToolToken::Arguments(args)) => {
-                    if !tools {
-                        continue;
-                    }
-
-                    match &mut state {
-                        ChatState::None => {
-                            Err(io::Error::new(io::ErrorKind::InvalidData, "unexpected chat state"))?;
-                        },
-                        ChatState::Response(response_parser) => {
-                            response_parser.push(&args);
-
-                            while let Some(next) = response_parser.next()? {
+                            state.done()?;
+                            while let Some(next) = state.next()? {
                                 yield next;
                             }
+                            response_states.remove(&index);
                         },
                     }
                 },
             }
         }
 
-        match state {
-            ChatState::None => {},
-            ChatState::Response(mut response_parser) => {
-                response_parser.done()?;
-
-                while let Some(next) = response_parser.next()? {
-                    yield next;
-                }
-            },
+        for (_index, mut state) in response_states.drain() {
+            state.done()?;
+            while let Some(next) = state.next()? {
+                yield next;
+            }
         }
     }
 }
 
-enum ChatState {
-    None,
-    Response(ResponseParser),
-}
-
-struct ResponseParser {
+struct ResponseParser<'a> {
     json_parser: JsonParser<PushJsonFeeder>,
     state: State,
+    index_gen: &'a AtomicUsize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -122,8 +123,8 @@ enum State {
 
     InMessagesArray,
 
-    InMessageObject,
-    ExpectMessageValue(MessageField),
+    InMessageObject(ChannelIndex),
+    ExpectMessageValue(ChannelIndex, MessageField),
 
     Done,
 }
@@ -141,7 +142,15 @@ enum MessageField {
     MessageContent,
 }
 
-impl ResponseParser {
+impl<'a> ResponseParser<'a> {
+    fn new(index_gen: &'a AtomicUsize) -> Self {
+        Self {
+            json_parser: JsonParser::new(PushJsonFeeder::new()),
+            state: State::ExpectRootStart,
+            index_gen,
+        }
+    }
+
     fn push(&mut self, input: &str) {
         self.json_parser.feeder.push_bytes(input.as_bytes());
     }
@@ -158,8 +167,8 @@ impl ResponseParser {
         Ok(())
     }
 
-    fn next(&mut self) -> io::Result<Option<AssistantEvent>> {
-        fn mk_err(s: impl Into<String>) -> io::Result<Option<AssistantEvent>> {
+    fn next(&mut self) -> io::Result<Option<ResponseEvent>> {
+        fn mk_err(s: impl Into<String>) -> io::Result<Option<ResponseEvent>> {
             Err(io::Error::new(io::ErrorKind::InvalidData, s.into()))
         }
 
@@ -177,8 +186,9 @@ impl ResponseParser {
                         self.state = State::InRootObject;
                     }
                     State::InMessagesArray => {
-                        self.state = State::InMessageObject;
-                        return Ok(Some(AssistantEvent::Typing));
+                        let index = self.index_gen.fetch_add(1, Ordering::Relaxed);
+                        self.state = State::InMessageObject(index);
+                        return Ok(Some(ResponseEvent::Message(MessageEvent::Start { index })));
                     }
                     _ => {
                         return mk_err("unexpected object start");
@@ -186,8 +196,11 @@ impl ResponseParser {
                 },
                 JsonEvent::EndObject => match self.state {
                     State::Done => {}
-                    State::InMessageObject => {
+                    State::InMessageObject(index) => {
                         self.state = State::InMessagesArray;
+                        return Ok(Some(ResponseEvent::Message(MessageEvent::Complete {
+                            index,
+                        })));
                     }
                     State::InRootObject => {
                         self.state = State::Done;
@@ -220,12 +233,13 @@ impl ResponseParser {
                         Ok(other) => return mk_err(format!("unexpected field: {other}")),
                         Err(err) => return mk_err(format!("could not get field name: {err}")),
                     },
-                    State::InMessageObject => match self.json_parser.current_str() {
+                    State::InMessageObject(index) => match self.json_parser.current_str() {
                         Ok("_reasoning") => {
-                            self.state = State::ExpectMessageValue(MessageField::Reasoning);
+                            self.state = State::ExpectMessageValue(index, MessageField::Reasoning);
                         }
                         Ok("message") => {
-                            self.state = State::ExpectMessageValue(MessageField::MessageContent);
+                            self.state =
+                                State::ExpectMessageValue(index, MessageField::MessageContent);
                         }
                         Ok(other) => return mk_err(format!("unexpected field: {other}")),
                         Err(err) => return mk_err(format!("could not get field name: {err}")),
@@ -241,22 +255,24 @@ impl ResponseParser {
                     match self.state {
                         State::ExpectRootValue(RootField::Reasoning) => {
                             self.state = State::InRootObject;
-                            return Ok(Some(AssistantEvent::Reasoning(value.to_string())));
+                            return Ok(Some(ResponseEvent::Reasoning(value.to_string())));
                         }
-                        State::ExpectMessageValue(MessageField::Reasoning) => {
-                            self.state = State::InMessageObject;
-                            return Ok(Some(AssistantEvent::Reasoning(value.to_string())));
+                        State::ExpectMessageValue(index, MessageField::Reasoning) => {
+                            self.state = State::InMessageObject(index);
+                            return Ok(Some(ResponseEvent::Reasoning(value.to_string())));
                         }
-                        State::ExpectMessageValue(MessageField::MessageContent) => {
-                            self.state = State::InMessageObject;
-                            return Ok(Some(AssistantEvent::Message(value.to_string())));
+                        State::ExpectMessageValue(index, MessageField::MessageContent) => {
+                            self.state = State::InMessageObject(index);
+                            return Ok(Some(ResponseEvent::Message(MessageEvent::Chunk {
+                                index,
+                                delta: value.to_string(),
+                            })));
                         }
                         _ => return mk_err("unexpected string value"),
                     }
                 }
                 JsonEvent::ValueTrue => match self.state {
                     State::ExpectRootValue(RootField::ShouldRespond) => {
-                        // TODO: should a typing event be sent here?
                         self.state = State::InRootObject;
                     }
                     _ => return mk_err("unexpected true value"),
@@ -274,14 +290,5 @@ impl ResponseParser {
             }
         }
         Ok(None)
-    }
-}
-
-impl Default for ResponseParser {
-    fn default() -> Self {
-        Self {
-            json_parser: JsonParser::new(PushJsonFeeder::new()),
-            state: State::ExpectRootStart,
-        }
     }
 }

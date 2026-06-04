@@ -15,9 +15,9 @@ use crate::provider::LlmMessage;
 use crate::provider::Provider;
 use crate::provider::ProviderCreateFn;
 use crate::provider::ProviderError;
-use crate::provider::TokenStream;
 use crate::provider::Tool;
 use crate::provider::ToolMode;
+use crate::stream::ResponseStream;
 
 #[derive(Default, Clone)]
 pub struct Providers {
@@ -76,7 +76,7 @@ pub struct Request {
 }
 
 impl Service<ProviderRequest> for Providers {
-    type Response = TokenStream;
+    type Response = ResponseStream;
     type Error = ProviderError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -95,7 +95,7 @@ impl Service<ProviderRequest> for Providers {
 
 // TODO: dont literally have both here
 impl Service<ProviderRequest> for Arc<Providers> {
-    type Response = TokenStream;
+    type Response = ResponseStream;
     type Error = ProviderError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -112,7 +112,10 @@ impl Service<ProviderRequest> for Arc<Providers> {
     }
 }
 
-async fn handle(provider: Option<Provider>, req: ProviderRequest) -> provider::Result<TokenStream> {
+async fn handle(
+    provider: Option<Provider>,
+    req: ProviderRequest,
+) -> provider::Result<ResponseStream> {
     let Some(provider) = provider else {
         return Err(ProviderError::IO(io::Error::new(
             io::ErrorKind::NotFound,

@@ -19,11 +19,11 @@ use crate::provider;
 use crate::provider::LlmMessage;
 use crate::provider::ProviderError;
 use crate::provider::Role;
-use crate::provider::Token;
 use crate::providers;
 use crate::providers::Request;
 use crate::session::Branch;
 use crate::session::UserInfo;
+use crate::stream::ResponseEvent;
 
 /// Chat layer on top of an LLM service, oriented for conversational text chats.
 ///
@@ -59,24 +59,12 @@ pub struct ChatRequest {
     pub messages: Branch,
 }
 
-/// Events returned by a service wrapped with [ChatAdapterLayer].
-#[derive(Debug)]
-pub enum AssistantEvent {
-    /// Optional reasoning done by the LLM.
-    Reasoning(String),
-    /// Indicates the LLM has decided to respond and is currently generating its next response. Also
-    /// gets sent when the LLM is generating any followup responses.
-    Typing,
-    /// An actual response message sent by the LLM. Multiple can be sent in a row.
-    Message(String),
-}
-
-pub type ChatStream = BoxStream<'static, io::Result<AssistantEvent>>;
+pub type ChatStream = BoxStream<'static, io::Result<ResponseEvent>>;
 
 impl<S, TokenStream> Layer<S> for ChatAdapterLayer<S>
 where
     S: Service<providers::Request, Response = TokenStream, Error = ProviderError>,
-    TokenStream: Stream<Item = io::Result<Token>>,
+    TokenStream: Stream<Item = io::Result<ResponseEvent>>,
 {
     type Service = ChatAdapterService<S>;
 
@@ -101,7 +89,7 @@ impl<S, TokenStream> Service<ChatRequest> for ChatAdapterService<S>
 where
     S: Service<providers::Request, Response = TokenStream, Error = ProviderError>,
     S::Future: Send + 'static,
-    TokenStream: Stream<Item = io::Result<Token>> + Send + 'static,
+    TokenStream: Stream<Item = io::Result<ResponseEvent>> + Send + 'static,
 {
     type Response = ChatStream;
     type Error = ProviderError;

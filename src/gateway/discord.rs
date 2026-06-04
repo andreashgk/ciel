@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -5,6 +6,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures_util::TryFutureExt;
 use futures_util::TryStreamExt;
+use rootcause::option_ext::OptionExt;
 use time::OffsetDateTime;
 use tokio::time::Instant;
 use tokio::time::sleep_until;
@@ -28,7 +30,6 @@ use twilight_model::channel::message::AllowedMentions;
 use twilight_model::id::Id;
 use twilight_model::id::marker::ChannelMarker;
 
-use crate::adapter::chat::AssistantEvent;
 use crate::adapter::chat::ChatAdapterLayer;
 use crate::adapter::chat::ChatRequest;
 use crate::adapter::chat::ChatStream;
@@ -43,6 +44,8 @@ use crate::session::BranchEntry;
 use crate::session::BranchId;
 use crate::session::SessionStore;
 use crate::session::UserInfo;
+use crate::stream::MessageEvent;
+use crate::stream::ResponseEvent;
 use crate::utils::queue_map::QueueMap;
 use crate::utils::queue_map::QueueMapReceiver;
 use crate::utils::secret::Secret;
@@ -227,20 +230,27 @@ async fn channel_worker(
         // 100 wpm ~ 500 cpm
         let cpm = (150 * 5) as f32;
 
+        let mut channels = HashMap::new();
+
         // TODO: properly handle this error by giving some feedback in the channel
         while let Some(response_event) = response_stream.try_next().await? {
             match response_event {
-                AssistantEvent::Reasoning(_) => {
-                    continue;
-                }
-                AssistantEvent::Typing => {
+                ResponseEvent::Message(MessageEvent::Start { index }) => {
+                    channels.insert(index, String::new());
+
                     // The typing trigger is not as important so it's okay to keep going after
                     // these errors.
                     if let Err(error) = http.create_typing_trigger(*receiver.key()).await {
                         error!(%error, "failed to send typing trigger");
                     }
                 }
-                AssistantEvent::Message(msg) => {
+                ResponseEvent::Message(MessageEvent::Chunk { index, delta }) => {
+                    let buf = channels.get_mut(&index).context("unknown stream channel")?;
+                    buf.push_str(&delta);
+                }
+                ResponseEvent::Message(MessageEvent::Complete { index }) => {
+                    let msg = channels.remove(&index).context("unknown stream channel")?;
+
                     if let Some(last_sent) = last_sent
                         && receiver.is_empty()
                     {
@@ -285,6 +295,9 @@ async fn channel_worker(
                     };
 
                     branch.push(entry);
+                }
+                _ => {
+                    continue;
                 }
             }
         }

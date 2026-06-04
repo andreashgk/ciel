@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::Write;
 use std::io::stdin;
 use std::io::stdout;
@@ -6,27 +7,30 @@ use futures_util::TryFutureExt;
 use futures_util::TryStreamExt;
 use nu_ansi_term::Color;
 use nu_ansi_term::Style;
+use rootcause::option_ext::OptionExt;
 use rootcause::prelude::ResultExt;
 use time::OffsetDateTime;
 use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower::util::BoxService;
+use tracing::error;
 
-use crate::adapter::chat::AssistantEvent;
 use crate::adapter::chat::ChatAdapterLayer;
 use crate::adapter::chat::ChatRequest;
 use crate::provider::ProviderError;
 use crate::provider::Role;
-use crate::provider::TokenStream;
 use crate::providers::Request;
 use crate::session::BranchEntry;
 use crate::session::BranchId;
 use crate::session::SessionStore;
+use crate::stream::MessageEvent;
+use crate::stream::ResponseEvent;
+use crate::stream::ResponseStream;
 
 pub struct Cli {
     pub sessions: SessionStore,
-    pub service: BoxService<Request, TokenStream, ProviderError>,
+    pub service: BoxService<Request, ResponseStream, ProviderError>,
     pub system_prompt: String,
 }
 
@@ -84,35 +88,46 @@ impl Cli {
                 .await
                 .context("failed to get LLM response")?;
 
+            let mut channels = HashMap::new();
+
             while let Some(response_event) = response_stream
                 .try_next()
                 .await
                 .context("failed to get next event")?
             {
                 match response_event {
-                    AssistantEvent::Reasoning(_) => {
-                        // TODO: display reasoning
-                        continue;
+                    ResponseEvent::Message(MessageEvent::Start { index }) => {
+                        channels.insert(index, String::new());
                     }
-                    AssistantEvent::Typing => {
-                        // TODO: show typing in the terminal
-                        continue;
+                    ResponseEvent::Message(MessageEvent::Chunk { index, delta }) => {
+                        let buf = channels.get_mut(&index).context("unknown stream channel")?;
+                        buf.push_str(&delta);
+
+                        _ = write!(stdout, "{}", Color::White.dimmed().paint(&delta));
+                        _ = stdout.flush();
                     }
-                    AssistantEvent::Message(msg) => {
+                    ResponseEvent::Message(MessageEvent::Complete { index }) => {
+                        let buf = channels.remove(&index).context("unknown stream channel")?;
+
+                        _ = writeln!(stdout);
+
                         let now = OffsetDateTime::now_utc();
                         let message_id = BranchId::new_from_time(now);
-
-                        _ = writeln!(stdout, "{}", Color::White.dimmed().paint(&msg));
 
                         let entry = BranchEntry {
                             id: message_id,
                             user: None,
                             role: Role::Assistant,
                             timestamp: now.to_utc(),
-                            content: msg,
+                            content: buf,
                         };
 
                         branch.push(entry);
+                    }
+                    _ => {
+                        // TODO: display reasoning
+                        // TODO: show LLM typing status in the terminal
+                        continue;
                     }
                 }
             }
@@ -121,6 +136,10 @@ impl Cli {
                 .put(Some(session_identifier), branch)
                 .await
                 .context("failed to write back session")?;
+
+            if !channels.is_empty() {
+                error!("some stream channels were not closed");
+            }
         }
     }
 }
