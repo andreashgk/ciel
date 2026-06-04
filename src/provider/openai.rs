@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::io;
@@ -19,6 +19,7 @@ use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 use serde::Deserialize;
 use tracing::error;
+use uuid::Uuid;
 
 use crate::config::Config;
 use crate::config::ConfigError;
@@ -192,7 +193,7 @@ impl ProviderImpl for OpenAI {
 
         // Quick helper function to close all open channels. Returns a list of close events that
         // need to be yielded.
-        let close_all = |streams: &mut HashMap<_, _>| {
+        let close_all = |streams: &mut BTreeMap<_, _>| {
             let mut events = Vec::with_capacity(streams.len());
             for (key, channel_index) in streams {
                 let ev = match key {
@@ -208,8 +209,10 @@ impl ProviderImpl for OpenAI {
             events
         };
 
-        let mut open_channels = HashMap::<StreamKey, ChannelIndex>::new();
-        let mut next_channel_id = 0;
+        // Since this will basically always have one element, BTreeMap is a slightly better fit
+        // here.
+        // Don't judge, it was more convenient for me this way.
+        let mut open_channels = BTreeMap::<StreamKey, ChannelIndex>::new();
 
         let stream = try_stream! {
             while let Some(item) = stream.try_next().await? {
@@ -247,12 +250,10 @@ impl ProviderImpl for OpenAI {
                                 yield ev;
                             }
 
-                            let id = next_channel_id;
+                            let id = Uuid::now_v7();
                             open_channels.insert(StreamKey::Message, id);
 
                             yield ResponseEvent::Message(MessageEvent::Start { index: id });
-
-                            next_channel_id += 1;
                             id
                         },
                     };
@@ -276,7 +277,7 @@ impl ProviderImpl for OpenAI {
                                 yield ev;
                             }
 
-                            let channel_index = next_channel_id;
+                            let channel_index = Uuid::now_v7();
                             open_channels.insert(StreamKey::Tool(*tool_index), channel_index);
 
                             yield ResponseEvent::Tool(ToolEvent::Start {

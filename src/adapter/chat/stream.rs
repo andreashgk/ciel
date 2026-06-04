@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 use std::io;
-use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::Ordering;
 
 use actson::JsonEvent;
 use actson::JsonParser;
@@ -10,6 +8,7 @@ use async_stream::try_stream;
 use futures_core::Stream;
 use futures_util::TryStreamExt;
 use tokio::pin;
+use uuid::Uuid;
 
 use crate::stream::ChannelIndex;
 use crate::stream::MessageEvent;
@@ -23,9 +22,6 @@ pub fn parse_token_stream(
     try_stream! {
         // Maps old(!!) channel index to a response parser state.
         let mut response_states = HashMap::<ChannelIndex, ResponseParser>::new();
-        // Incremental counter for new indices. Using an atomic value was necessary since something
-        // like refcell does not work here (not Sync).
-        let next_channel_id = AtomicUsize::new(0);
 
         pin!(stream);
         while let Some(event) = stream.try_next().await? {
@@ -40,7 +36,7 @@ pub fn parse_token_stream(
 
                     match event {
                         MessageEvent::Start { index } => {
-                            response_states.insert(index, ResponseParser::new(&next_channel_id));
+                            response_states.insert(index, ResponseParser::default());
                         },
                         MessageEvent::Chunk { index, delta } => {
                             let state = response_states
@@ -72,7 +68,7 @@ pub fn parse_token_stream(
 
                     match event {
                         ToolEvent::Start { index, .. } => {
-                            response_states.insert(index, ResponseParser::new(&next_channel_id));
+                            response_states.insert(index, ResponseParser::default());
                         },
                         ToolEvent::Chunk { index, delta } => {
                             let state = response_states
@@ -113,10 +109,9 @@ pub fn parse_token_stream(
     }
 }
 
-struct ResponseParser<'a> {
+struct ResponseParser {
     json_parser: JsonParser<PushJsonFeeder>,
     state: State,
-    index_gen: &'a AtomicUsize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,15 +141,7 @@ enum MessageField {
     MessageContent,
 }
 
-impl<'a> ResponseParser<'a> {
-    fn new(index_gen: &'a AtomicUsize) -> Self {
-        Self {
-            json_parser: JsonParser::new(PushJsonFeeder::new()),
-            state: State::ExpectRootStart,
-            index_gen,
-        }
-    }
-
+impl ResponseParser {
     fn push(&mut self, input: &str) {
         self.json_parser.feeder.push_bytes(input.as_bytes());
     }
@@ -190,7 +177,7 @@ impl<'a> ResponseParser<'a> {
                         self.state = State::InRootObject;
                     }
                     State::InMessagesArray => {
-                        let index = self.index_gen.fetch_add(1, Ordering::Relaxed);
+                        let index = Uuid::now_v7();
                         self.state = State::InMessageObject(index);
                         return Ok(Some(ResponseEvent::Message(MessageEvent::Start { index })));
                     }
@@ -294,5 +281,14 @@ impl<'a> ResponseParser<'a> {
             }
         }
         Ok(None)
+    }
+}
+
+impl Default for ResponseParser {
+    fn default() -> Self {
+        Self {
+            json_parser: JsonParser::new(PushJsonFeeder::new()),
+            state: State::ExpectRootStart,
+        }
     }
 }
