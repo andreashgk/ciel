@@ -219,9 +219,9 @@ async fn channel_worker(
         }
 
         // Allow for multiple turns, for example for tool calls.
-        let mut is_done = true;
-        while is_done == true {
-            is_done = false;
+        let mut should_continue = true;
+        while should_continue {
+            should_continue = false;
 
             // TODO: properly handle this error by giving some feedback in the channel
             let service = chat.ready().await?;
@@ -322,7 +322,7 @@ async fn channel_worker(
                         if !handled {
                             warn!(%index, %name, "tool call was not handled");
                         }
-                        is_done = true;
+                        should_continue = true;
 
                         http.create_message(*receiver.key())
                             .content(&format!("> TOOL: {name}"))

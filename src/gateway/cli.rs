@@ -79,9 +79,9 @@ impl Cli {
             }
 
             // Allow for multiple turns, for example for tool calls.
-            let mut is_done = true;
-            while is_done == true {
-                is_done = false;
+            let mut should_continue = true;
+            while should_continue {
+                should_continue = false;
 
                 let service = chat.ready().await?;
                 let mut response_stream = service
@@ -148,7 +148,7 @@ impl Cli {
                             if !handled {
                                 warn!(%index, %name, "tool call was not handled");
                             }
-                            is_done = true;
+                            should_continue = true;
 
                             tools.insert(
                                 index,
