@@ -252,7 +252,7 @@ impl ProviderImpl for OpenAI {
         let stream = try_stream! {
             while let Some(item) = stream.try_next().await? {
                 if item.data == "[DONE]" {
-                    return;
+                    break;
                 }
 
                 let event: Event = serde_json::from_str(&item.data)

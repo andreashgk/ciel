@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -31,7 +31,7 @@ use twilight_model::id::Id;
 use twilight_model::id::marker::ChannelMarker;
 
 use crate::adapter::chat::ChatAdapterLayer;
-use crate::adapter::chat::ChatStream;
+use crate::adapter::tool::ToolAdapterLayer;
 use crate::config::Config;
 use crate::config::ConfigError;
 use crate::context::Context;
@@ -47,6 +47,11 @@ use crate::session::SessionStore;
 use crate::session::UserInfo;
 use crate::stream::MessageEvent;
 use crate::stream::ResponseEvent;
+use crate::stream::ResponseStream;
+use crate::stream::ToolEvent;
+use crate::stream::ToolResultEvent;
+use crate::tool::TestTool;
+use crate::tool::Tool;
 use crate::utils::queue_map::QueueMap;
 use crate::utils::queue_map::QueueMapReceiver;
 use crate::utils::secret::Secret;
@@ -89,6 +94,7 @@ impl GatewayImpl for Discord {
             let sessions = ctx.sessions().clone();
             let model = ctx.model().clone();
             let chat = ServiceBuilder::new()
+                .layer(ToolAdapterLayer::default().with_tool(Tool::new(TestTool::default())))
                 .layer(ChatAdapterLayer::default())
                 .service(model);
 
@@ -153,7 +159,7 @@ impl GatewayImpl for Discord {
 async fn channel_worker(
     mut receiver: QueueMapReceiver<Id<ChannelMarker>, Event>,
     sessions: SessionStore,
-    mut chat: impl Service<Request, Response = ChatStream, Error = ProviderError>,
+    mut chat: impl Service<Request, Response = ResponseStream, Error = ProviderError>,
     system_prompt: String,
     http: Arc<Client>,
 ) -> rootcause::Result<()> {
@@ -231,7 +237,21 @@ async fn channel_worker(
         // 100 wpm ~ 500 cpm
         let cpm = (150 * 5) as f32;
 
-        let mut channels = HashMap::new();
+        let mut channels = BTreeMap::new();
+        let mut tools = BTreeMap::new();
+        let mut tool_results = BTreeMap::new();
+
+        struct ToolState {
+            name: String,
+            id: String,
+            args: String,
+        }
+
+        struct ToolResultState {
+            name: String,
+            id: String,
+            result: String,
+        }
 
         // TODO: properly handle this error by giving some feedback in the channel
         while let Some(response_event) = response_stream.try_next().await? {
@@ -296,6 +316,81 @@ async fn channel_worker(
                     };
 
                     branch.push(entry);
+                }
+                ResponseEvent::Tool(ToolEvent::Start {
+                    name,
+                    index,
+                    tool_call_id,
+                    handled,
+                }) => {
+                    if !handled {
+                        warn!(%index, %name, "tool call was not handled");
+                    }
+
+                    http.create_message(*receiver.key())
+                        .content(&format!("> TOOL: {name}"))
+                        .await?;
+
+                    tools.insert(
+                        index,
+                        ToolState {
+                            name,
+                            id: tool_call_id,
+                            args: String::new(),
+                        },
+                    );
+                }
+                ResponseEvent::Tool(ToolEvent::Chunk { index, delta }) => {
+                    let Some(state) = tools.get_mut(&index) else {
+                        continue;
+                    };
+
+                    state.args.push_str(&delta);
+                }
+                ResponseEvent::Tool(ToolEvent::Complete { index }) => {
+                    let Some(state) = tools.remove(&index) else {
+                        continue;
+                    };
+
+                    branch.push(BranchEntry::Tool {
+                        id: BranchId::new_from_current_time(),
+                        tool_call_id: state.id,
+                        name: state.name,
+                        arguments: state.args,
+                    });
+                }
+                ResponseEvent::ToolResult(ToolResultEvent::Start {
+                    index,
+                    tool_call_id,
+                    name,
+                }) => {
+                    tool_results.insert(
+                        index,
+                        ToolResultState {
+                            name,
+                            id: tool_call_id,
+                            result: String::new(),
+                        },
+                    );
+                }
+                ResponseEvent::ToolResult(ToolResultEvent::Chunk { index, delta }) => {
+                    let Some(state) = tool_results.get_mut(&index) else {
+                        continue;
+                    };
+
+                    state.result.push_str(&delta);
+                }
+                ResponseEvent::ToolResult(ToolResultEvent::Complete { index }) => {
+                    let Some(state) = tool_results.remove(&index) else {
+                        continue;
+                    };
+
+                    branch.push(BranchEntry::ToolResult {
+                        id: BranchId::new_from_current_time(),
+                        tool_call_id: state.id,
+                        name: state.name,
+                        result: state.result,
+                    });
                 }
                 _ => {
                     continue;

@@ -18,10 +18,12 @@ use crate::adapter::chat::stream::parse_token_stream;
 use crate::provider;
 use crate::provider::ProviderError;
 use crate::request::Request;
+use crate::request::ToolMode;
 use crate::session::Branch;
 use crate::session::BranchEntry;
 use crate::session::UserInfo;
 use crate::stream::ResponseEvent;
+use crate::tool::ToolInfo;
 
 /// Chat layer on top of an LLM service, oriented for conversational text chats.
 ///
@@ -96,6 +98,7 @@ where
     fn call(&mut self, mut req: Request) -> Self::Future {
         let time_format = self.time_format.clone();
         let schema = self.schema.clone();
+        let do_use_tools = req.has_tools();
 
         // Basically the equivalent of a `try` block to build the request, so it can be wrapped into
         // a future afterwards.
@@ -157,12 +160,25 @@ where
                 .map(|(i, entry)| match (i, entry) {
                     (0, BranchEntry::System { id, message }) => BranchEntry::System {
                         id,
-                        message: wrap_system_prompt(false, &schema_str, &message),
+                        message: wrap_system_prompt(do_use_tools, &schema_str, &message),
                     },
                     (_, other) => other,
                 });
 
-            req.set_branch(Branch::new(history)).set_schema(schema);
+            req.set_branch(Branch::new(history));
+
+            // Tools and structured output are mutually exclusive, so the workaround is making the
+            // LLM output its structured output as another tool.
+            if do_use_tools {
+                req.add_tool(Arc::new(ToolInfo {
+                    name: "respond".to_string(),
+                    description: "Use this tool to chat with users.".to_string(),
+                    arguments: Some(schema["schema"].clone()),
+                }))
+                .set_tool_mode(ToolMode::Required);
+            } else {
+                req.set_schema(schema).set_tool_mode(ToolMode::None);
+            }
 
             Ok(req)
         };
@@ -173,7 +189,7 @@ where
         async move {
             let response_stream = inner_future?.await?;
             // TODO: apply instrument to this stream, maybe?
-            let response_stream = parse_token_stream(false, response_stream);
+            let response_stream = parse_token_stream(do_use_tools, response_stream);
 
             Ok(response_stream.boxed())
         }

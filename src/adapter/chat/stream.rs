@@ -67,13 +67,23 @@ pub fn parse_token_stream(
                     }
 
                     match event {
-                        ToolEvent::Start { index, .. } => {
+                        ToolEvent::Start { index, name, tool_call_id, handled } => {
+                            if name != "respond" {
+                                yield ResponseEvent::Tool(ToolEvent::Start {
+                                    index,
+                                    tool_call_id,
+                                    name,
+                                    handled,
+                                });
+                                continue;
+                            }
                             response_states.insert(index, ResponseParser::default());
                         },
                         ToolEvent::Chunk { index, delta } => {
-                            let state = response_states
-                                .get_mut(&index)
-                                .ok_or_else(|| io::Error::other("unknown channel"))?;
+                            let Some(state) = response_states.get_mut(&index) else {
+                                yield ResponseEvent::Tool(ToolEvent::Chunk { index, delta });
+                                continue;
+                            };
 
                             state.push(&delta);
                             while let Some(next) = state.next()? {
@@ -81,9 +91,10 @@ pub fn parse_token_stream(
                             }
                         },
                         ToolEvent::Complete { index } => {
-                            let state = response_states
-                                .get_mut(&index)
-                                .ok_or_else(|| io::Error::other("unknown channel"))?;
+                            let Some(state) = response_states.get_mut(&index) else {
+                                yield ResponseEvent::Tool(ToolEvent::Complete { index });
+                                continue;
+                            };
 
                             state.done()?;
                             while let Some(next) = state.next()? {
@@ -93,8 +104,8 @@ pub fn parse_token_stream(
                         },
                     }
                 },
-                ResponseEvent::ToolResult(_event) => {
-                    // TODO: support passing along tool output from this layer
+                ResponseEvent::ToolResult(event) => {
+                    yield ResponseEvent::ToolResult(event);
                     continue;
                 },
             }

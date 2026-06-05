@@ -39,6 +39,10 @@ pub enum MessageEvent {
 #[derive(Debug, Clone)]
 pub enum ToolEvent {
     /// Sent when the LLM starts calling a tool.
+    ///
+    /// If handling this tool call, this event should be yielded *before* actually executing the
+    /// tool to prevent race conditions when a driver decides to cancel the stream before seeing
+    /// any tool calls.
     Start {
         index: ChannelIndex,
         tool_call_id: String,
@@ -98,6 +102,12 @@ impl ResponseStream {
     /// Returns the stream with the current span attached.
     pub fn instrumented(mut self) -> Self {
         self.span = Span::current();
+        self
+    }
+
+    /// Returns the stream with the provided span attached.
+    pub fn instrumented_with(mut self, span: Span) -> Self {
+        self.span = span;
         self
     }
 }
