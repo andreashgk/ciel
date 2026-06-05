@@ -55,35 +55,3 @@ pub trait ToolImpl: Send + Sync {
     /// Both streaming arguments and streaming the function outputs is possible, but optional.
     async fn call(&self, mut arguments: mpsc::Receiver<String>, output: mpsc::Sender<String>);
 }
-
-#[derive(Clone)]
-pub struct TestTool {
-    info: Arc<ToolInfo>,
-}
-
-impl Default for TestTool {
-    fn default() -> Self {
-        let params = r#"{"type": "object", "properties": {}}"#;
-        let params = serde_json::from_str(params).unwrap();
-        Self {
-            info: Arc::new(ToolInfo {
-                name: "test".to_string(),
-                description: "Call this tool when the user asks for it.".to_string(),
-                arguments: Some(params),
-            }),
-        }
-    }
-}
-
-#[async_trait]
-impl ToolImpl for TestTool {
-    fn info(&self) -> &Arc<ToolInfo> {
-        &self.info
-    }
-
-    async fn call(&self, mut arguments: mpsc::Receiver<String>, output: mpsc::Sender<String>) {
-        arguments.close();
-
-        output.send("42".to_string()).await.unwrap();
-    }
-}
