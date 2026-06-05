@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use futures_util::TryFutureExt;
 use futures_util::TryStreamExt;
 use rootcause::option_ext::OptionExt;
+use serde::Deserialize;
 use time::OffsetDateTime;
 use tokio::time::Instant;
 use tokio::time::sleep_until;
@@ -53,8 +54,9 @@ use crate::utils::secret::Secret;
 
 #[derive(Debug)]
 pub struct Discord {
-    pub token: Secret<String>,
-    pub allowed_channels: HashSet<Id<ChannelMarker>>,
+    token: Secret<String>,
+    allowed_channels: HashSet<Id<ChannelMarker>>,
+    strings: Arc<Strings>,
 }
 
 impl Discord {
@@ -62,6 +64,9 @@ impl Discord {
         let token = config.read::<Secret<String>>("token")?;
         let allowed_channels = config
             .read_optional::<HashSet<Id<ChannelMarker>>>("allowed-channels")?
+            .unwrap_or_default();
+        let strings = config
+            .read_optional::<Strings>("strings")?
             .unwrap_or_default();
 
         if allowed_channels.is_empty() {
@@ -71,8 +76,17 @@ impl Discord {
         Ok(Arc::new(Self {
             token,
             allowed_channels,
+            strings: Arc::new(strings),
         }))
     }
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct Strings {
+    #[serde(rename = "tool.pending")]
+    tool_pending: Option<String>,
+    #[serde(rename = "tool.complete")]
+    tool_complete: Option<String>,
 }
 
 #[async_trait]
@@ -84,6 +98,8 @@ impl GatewayImpl for Discord {
         let http = Arc::new(Client::builder().token(token.0.clone()).build());
         let current_user = http.current_user().await?;
         let current_user = current_user.model().await?;
+
+        let strings = self.strings.clone();
 
         tokio::spawn(async move {
             let sessions = ctx.sessions().clone();
@@ -132,6 +148,7 @@ impl GatewayImpl for Discord {
                         chat.clone(),
                         ctx.system_prompt().to_string(),
                         http.clone(),
+                        strings.clone(),
                     )
                     .map_err(|error| {
                             error!("error while processing channel: {error}");
@@ -153,6 +170,7 @@ async fn channel_worker(
     mut chat: impl Service<Request, Response = ResponseStream, Error = ProviderError>,
     system_prompt: String,
     http: Arc<Client>,
+    strings: Arc<Strings>,
 ) -> rootcause::Result<()> {
     let mut events = Vec::new();
     loop {
@@ -236,6 +254,7 @@ async fn channel_worker(
             let mut channels = BTreeMap::new();
             let mut tools = BTreeMap::new();
             let mut tool_results = BTreeMap::new();
+            let mut tool_messages = BTreeMap::new();
 
             struct ToolState {
                 name: String,
@@ -324,9 +343,19 @@ async fn channel_worker(
                         }
                         should_continue = true;
 
-                        http.create_message(*receiver.key())
-                            .content(&format!("> TOOL: {name}"))
+                        let tool_message = http
+                            .create_message(*receiver.key())
+                            .content(
+                                &strings
+                                    .tool_pending
+                                    .as_deref()
+                                    .unwrap_or("-# tool pending: $NAME")
+                                    .replace("$NAME", &name),
+                            )
+                            .await?
+                            .model()
                             .await?;
+                        tool_messages.insert(tool_call_id.clone(), tool_message.id);
 
                         tools.insert(
                             index,
@@ -382,12 +411,30 @@ async fn channel_worker(
                             continue;
                         };
 
+                        let tool_message = tool_messages.remove(&state.id);
+
                         branch.push(BranchEntry::ToolResult {
                             id: BranchId::new_from_current_time(),
-                            tool_call_id: state.id,
-                            name: state.name,
+                            tool_call_id: state.id.clone(),
+                            name: state.name.clone(),
                             result: state.result,
                         });
+
+                        if let Some(tool_message) = tool_message {
+                            let res = http
+                                .update_message(*receiver.key(), tool_message)
+                                .content(Some(
+                                    &strings
+                                        .tool_complete
+                                        .as_deref()
+                                        .unwrap_or("-# tool complete: $NAME")
+                                        .replace("$NAME", &state.name),
+                                ))
+                                .await;
+                            if let Err(err) = res {
+                                error!("could not update tool message: {err}");
+                            }
+                        }
                     }
                     _ => {
                         continue;
