@@ -8,8 +8,8 @@ use futures_util::FutureExt;
 use reverie_core::config::Config;
 use reverie_core::provider;
 use reverie_core::provider::Provider;
-use reverie_core::provider::ProviderCreateFn;
 use reverie_core::provider::ProviderError;
+use reverie_core::provider::ProviderFactory;
 use reverie_core::provider::request::Request;
 use reverie_core::provider::response::ResponseStream;
 use serde::Deserialize;
@@ -17,13 +17,13 @@ use tower::Service;
 
 #[derive(Default, Clone)]
 pub struct Providers {
-    types: HashMap<String, ProviderCreateFn>,
+    types: HashMap<String, ProviderFactory>,
     map: HashMap<String, Provider>,
 }
 
 impl Providers {
-    pub fn register_type(&mut self, name: String, create_fn: ProviderCreateFn) {
-        self.types.insert(name, create_fn);
+    pub fn register(&mut self, name: impl Into<String>, create_fn: ProviderFactory) {
+        self.types.insert(name.into(), create_fn);
     }
 
     pub async fn apply_config(&mut self, config: Config) -> provider::Result<()> {
@@ -40,8 +40,8 @@ impl Providers {
                 )
             })?;
 
-            let provider_impl = provider_fn(config.scoped(&name)).await?;
-            map.insert(name.to_string(), Provider::new(provider_impl));
+            let provider = provider_fn(config.scoped(&name))?;
+            map.insert(name.to_string(), provider);
         }
 
         self.map = map;

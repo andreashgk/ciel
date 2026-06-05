@@ -1,7 +1,6 @@
 use std::env;
 use std::panic;
 use std::process::ExitCode;
-use std::sync::Arc;
 use std::time::Duration;
 
 use fjall::SingleWriterTxDatabase;
@@ -10,7 +9,6 @@ use reverie_adapter::tool_adapter::ToolAdapterLayer;
 use reverie_core::config::Config;
 use reverie_core::gateway::Gateways;
 use reverie_core::provider::ProviderError;
-use reverie_core::provider::ProviderImpl;
 use reverie_core::provider::request::Request;
 use reverie_core::session::store::SessionStore;
 use reverie_core::tool::Tool;
@@ -107,12 +105,7 @@ async fn do_main(subcommand: Subcommand) -> rootcause::Result<()> {
     .context("unable to open database")?;
 
     let mut providers = Providers::default();
-    providers.register_type(
-        "openai".to_string(),
-        Arc::new(|v| {
-            Box::pin(async { OpenAI::new(v).map(|v| Arc::new(v) as Arc<dyn ProviderImpl>) })
-        }),
-    );
+    providers.register("openai", OpenAI::factory);
     providers
         .apply_config(config.scoped("provider"))
         .await

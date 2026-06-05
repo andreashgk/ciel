@@ -3,6 +3,7 @@ use std::fmt::Debug;
 use std::fmt::Display;
 use std::io;
 use std::ops::Not;
+use std::sync::Arc;
 
 use async_stream::try_stream;
 use async_trait::async_trait;
@@ -19,6 +20,7 @@ use hyper_util::rt::TokioExecutor;
 use reverie_core::config::Config;
 use reverie_core::config::ConfigError;
 use reverie_core::provider;
+use reverie_core::provider::Provider;
 use reverie_core::provider::ProviderError;
 use reverie_core::provider::ProviderImpl;
 use reverie_core::provider::request::Request;
@@ -65,18 +67,18 @@ struct OpenAIConfig {
 }
 
 impl OpenAI {
-    pub fn new(cfg: Config) -> provider::Result<Self> {
+    pub fn factory(cfg: Config) -> Result<Provider, ConfigError> {
         let config = cfg.read("")?;
 
         let client = Client::builder(TokioExecutor::new()).build(
             HttpsConnector::<HttpConnector>::builder()
                 .with_native_roots()
-                .map_err(|err| ProviderError::IO(io::Error::other(err)))?
+                .map_err(|err| ConfigError::Other(format!("failed to build http client: {err}")))?
                 .https_or_http()
                 .enable_all_versions()
                 .build(),
         );
-        Ok(Self { config, client })
+        Ok(Provider::new(Arc::new(Self { config, client })))
     }
 }
 

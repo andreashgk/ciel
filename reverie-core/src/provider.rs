@@ -8,7 +8,6 @@ use std::io;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures_core::future::BoxFuture;
 use thiserror::Error;
 use tracing::instrument;
 
@@ -22,8 +21,7 @@ pub trait ProviderImpl: Display + Debug + Send + Sync {
     async fn chat(&self, request: Request) -> Result<ResponseStream>;
 }
 
-pub type ProviderCreateFn =
-    Arc<dyn Fn(Config) -> BoxFuture<'static, Result<Arc<dyn ProviderImpl>>> + Send + Sync>;
+pub type ProviderFactory = fn(Config) -> std::result::Result<Provider, ConfigError>;
 
 #[derive(Clone, Debug)]
 pub struct Provider(Arc<dyn ProviderImpl>);
