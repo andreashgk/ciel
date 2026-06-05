@@ -218,178 +218,187 @@ async fn channel_worker(
             branch = branch.sliced(50..);
         }
 
-        // TODO: properly handle this error by giving some feedback in the channel
-        let service = chat.ready().await?;
-        // TODO: properly handle this error by giving some feedback in the channel
-        let mut response_stream = service.call(Request::from_branch(branch.clone())).await?;
+        // Allow for multiple turns, for example for tool calls.
+        let mut is_done = true;
+        while is_done == true {
+            is_done = false;
 
-        let mut last_sent = None;
-        // The bot simulates typing at 150 wpm.
-        // 100 wpm ~ 500 cpm
-        let cpm = (150 * 5) as f32;
+            // TODO: properly handle this error by giving some feedback in the channel
+            let service = chat.ready().await?;
+            // TODO: properly handle this error by giving some feedback in the channel
+            let mut response_stream = service.call(Request::from_branch(branch.clone())).await?;
 
-        let mut channels = BTreeMap::new();
-        let mut tools = BTreeMap::new();
-        let mut tool_results = BTreeMap::new();
+            let mut last_sent = None;
+            // The bot simulates typing at 150 wpm.
+            // 100 wpm ~ 500 cpm
+            let cpm = (150 * 5) as f32;
 
-        struct ToolState {
-            name: String,
-            id: String,
-            args: String,
-        }
+            let mut channels = BTreeMap::new();
+            let mut tools = BTreeMap::new();
+            let mut tool_results = BTreeMap::new();
 
-        struct ToolResultState {
-            name: String,
-            id: String,
-            result: String,
-        }
+            struct ToolState {
+                name: String,
+                id: String,
+                args: String,
+            }
 
-        // TODO: properly handle this error by giving some feedback in the channel
-        while let Some(response_event) = response_stream.try_next().await? {
-            match response_event {
-                ResponseEvent::Message(MessageEvent::Start { index }) => {
-                    channels.insert(index, String::new());
+            struct ToolResultState {
+                name: String,
+                id: String,
+                result: String,
+            }
 
-                    // The typing trigger is not as important so it's okay to keep going after
-                    // these errors.
-                    if let Err(error) = http.create_typing_trigger(*receiver.key()).await {
-                        error!(%error, "failed to send typing trigger");
+            // TODO: properly handle this error by giving some feedback in the channel
+            while let Some(response_event) = response_stream.try_next().await? {
+                match response_event {
+                    ResponseEvent::Message(MessageEvent::Start { index }) => {
+                        channels.insert(index, String::new());
+
+                        // The typing trigger is not as important so it's okay to keep going after
+                        // these errors.
+                        if let Err(error) = http.create_typing_trigger(*receiver.key()).await {
+                            error!(%error, "failed to send typing trigger");
+                        }
                     }
-                }
-                ResponseEvent::Message(MessageEvent::Chunk { index, delta }) => {
-                    let buf = channels.get_mut(&index).context("unknown stream channel")?;
-                    buf.push_str(&delta);
-                }
-                ResponseEvent::Message(MessageEvent::Complete { index }) => {
-                    let msg = channels.remove(&index).context("unknown stream channel")?;
-
-                    if let Some(last_sent) = last_sent
-                        && receiver.is_empty()
-                    {
-                        // .len() instead of counting chars is not really an issue here.
-                        let duration = msg.len() as f32 * 60. / cpm;
-                        let duration = duration.min(3.);
-                        sleep_until(last_sent + Duration::from_secs_f32(duration)).await;
+                    ResponseEvent::Message(MessageEvent::Chunk { index, delta }) => {
+                        let buf = channels.get_mut(&index).context("unknown stream channel")?;
+                        buf.push_str(&delta);
                     }
-                    last_sent = Some(Instant::now());
-                    let now = OffsetDateTime::now_utc();
-                    let message_id = BranchId::new_from_time(now);
+                    ResponseEvent::Message(MessageEvent::Complete { index }) => {
+                        let msg = channels.remove(&index).context("unknown stream channel")?;
 
-                    // Send the response in 2000 character chunks (if responses are too large).
-                    let mut msg_ref = msg.as_str();
-                    while !msg_ref.is_empty() {
-                        let chunk_end = msg_ref
-                            .char_indices()
-                            .nth(2000)
-                            .map(|(i, _)| i)
-                            .unwrap_or(msg_ref.len());
+                        if let Some(last_sent) = last_sent
+                            && receiver.is_empty()
+                        {
+                            // .len() instead of counting chars is not really an issue here.
+                            let duration = msg.len() as f32 * 60. / cpm;
+                            let duration = duration.min(3.);
+                            sleep_until(last_sent + Duration::from_secs_f32(duration)).await;
+                        }
+                        last_sent = Some(Instant::now());
+                        let now = OffsetDateTime::now_utc();
+                        let message_id = BranchId::new_from_time(now);
 
-                        let chunk;
-                        (chunk, msg_ref) = msg_ref.split_at(chunk_end);
+                        // Send the response in 2000 character chunks (if responses are too large).
+                        let mut msg_ref = msg.as_str();
+                        while !msg_ref.is_empty() {
+                            let chunk_end = msg_ref
+                                .char_indices()
+                                .nth(2000)
+                                .map(|(i, _)| i)
+                                .unwrap_or(msg_ref.len());
+
+                            let chunk;
+                            (chunk, msg_ref) = msg_ref.split_at(chunk_end);
+
+                            http.create_message(*receiver.key())
+                                .content(chunk)
+                                .allowed_mentions(Some(&AllowedMentions {
+                                    parse: Vec::new(),
+                                    replied_user: true,
+                                    roles: Vec::new(),
+                                    users: Vec::new(),
+                                }))
+                                .await?;
+                        }
+
+                        let entry = BranchEntry::Message {
+                            id: message_id,
+                            user: None,
+                            role: Role::Assistant,
+                            timestamp: now.to_utc(),
+                            content: msg,
+                        };
+
+                        branch.push(entry);
+                    }
+                    ResponseEvent::Tool(ToolEvent::Start {
+                        name,
+                        index,
+                        tool_call_id,
+                        handled,
+                    }) => {
+                        if !handled {
+                            warn!(%index, %name, "tool call was not handled");
+                        }
+                        is_done = true;
 
                         http.create_message(*receiver.key())
-                            .content(chunk)
-                            .allowed_mentions(Some(&AllowedMentions {
-                                parse: Vec::new(),
-                                replied_user: true,
-                                roles: Vec::new(),
-                                users: Vec::new(),
-                            }))
+                            .content(&format!("> TOOL: {name}"))
                             .await?;
+
+                        tools.insert(
+                            index,
+                            ToolState {
+                                name,
+                                id: tool_call_id,
+                                args: String::new(),
+                            },
+                        );
                     }
+                    ResponseEvent::Tool(ToolEvent::Chunk { index, delta }) => {
+                        let Some(state) = tools.get_mut(&index) else {
+                            continue;
+                        };
 
-                    let entry = BranchEntry::Message {
-                        id: message_id,
-                        user: None,
-                        role: Role::Assistant,
-                        timestamp: now.to_utc(),
-                        content: msg,
-                    };
-
-                    branch.push(entry);
-                }
-                ResponseEvent::Tool(ToolEvent::Start {
-                    name,
-                    index,
-                    tool_call_id,
-                    handled,
-                }) => {
-                    if !handled {
-                        warn!(%index, %name, "tool call was not handled");
+                        state.args.push_str(&delta);
                     }
+                    ResponseEvent::Tool(ToolEvent::Complete { index }) => {
+                        let Some(state) = tools.remove(&index) else {
+                            continue;
+                        };
 
-                    http.create_message(*receiver.key())
-                        .content(&format!("> TOOL: {name}"))
-                        .await?;
-
-                    tools.insert(
+                        branch.push(BranchEntry::Tool {
+                            id: BranchId::new_from_current_time(),
+                            tool_call_id: state.id,
+                            name: state.name,
+                            arguments: state.args,
+                        });
+                    }
+                    ResponseEvent::ToolResult(ToolResultEvent::Start {
                         index,
-                        ToolState {
-                            name,
-                            id: tool_call_id,
-                            args: String::new(),
-                        },
-                    );
-                }
-                ResponseEvent::Tool(ToolEvent::Chunk { index, delta }) => {
-                    let Some(state) = tools.get_mut(&index) else {
-                        continue;
-                    };
+                        tool_call_id,
+                        name,
+                    }) => {
+                        tool_results.insert(
+                            index,
+                            ToolResultState {
+                                name,
+                                id: tool_call_id,
+                                result: String::new(),
+                            },
+                        );
+                    }
+                    ResponseEvent::ToolResult(ToolResultEvent::Chunk { index, delta }) => {
+                        let Some(state) = tool_results.get_mut(&index) else {
+                            continue;
+                        };
 
-                    state.args.push_str(&delta);
-                }
-                ResponseEvent::Tool(ToolEvent::Complete { index }) => {
-                    let Some(state) = tools.remove(&index) else {
-                        continue;
-                    };
+                        state.result.push_str(&delta);
+                    }
+                    ResponseEvent::ToolResult(ToolResultEvent::Complete { index }) => {
+                        let Some(state) = tool_results.remove(&index) else {
+                            continue;
+                        };
 
-                    branch.push(BranchEntry::Tool {
-                        id: BranchId::new_from_current_time(),
-                        tool_call_id: state.id,
-                        name: state.name,
-                        arguments: state.args,
-                    });
-                }
-                ResponseEvent::ToolResult(ToolResultEvent::Start {
-                    index,
-                    tool_call_id,
-                    name,
-                }) => {
-                    tool_results.insert(
-                        index,
-                        ToolResultState {
-                            name,
-                            id: tool_call_id,
-                            result: String::new(),
-                        },
-                    );
-                }
-                ResponseEvent::ToolResult(ToolResultEvent::Chunk { index, delta }) => {
-                    let Some(state) = tool_results.get_mut(&index) else {
+                        branch.push(BranchEntry::ToolResult {
+                            id: BranchId::new_from_current_time(),
+                            tool_call_id: state.id,
+                            name: state.name,
+                            result: state.result,
+                        });
+                    }
+                    _ => {
                         continue;
-                    };
-
-                    state.result.push_str(&delta);
-                }
-                ResponseEvent::ToolResult(ToolResultEvent::Complete { index }) => {
-                    let Some(state) = tool_results.remove(&index) else {
-                        continue;
-                    };
-
-                    branch.push(BranchEntry::ToolResult {
-                        id: BranchId::new_from_current_time(),
-                        tool_call_id: state.id,
-                        name: state.name,
-                        result: state.result,
-                    });
-                }
-                _ => {
-                    continue;
+                    }
                 }
             }
-        }
 
-        sessions.put(Some(session_identifier), branch).await?;
+            sessions
+                .put(Some(session_identifier.clone()), branch.clone())
+                .await?;
+        }
     }
     Ok(())
 }
