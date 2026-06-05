@@ -16,15 +16,12 @@ use tower::Service;
 
 use crate::adapter::chat::stream::parse_token_stream;
 use crate::provider;
-use crate::provider::LlmMessage;
 use crate::provider::ProviderError;
-use crate::provider::Role;
-use crate::providers;
-use crate::providers::Request;
+use crate::request::Request;
 use crate::session::Branch;
+use crate::session::BranchEntry;
 use crate::session::UserInfo;
 use crate::stream::ResponseEvent;
-use crate::tool::ToolInfo;
 
 /// Chat layer on top of an LLM service, oriented for conversational text chats.
 ///
@@ -53,19 +50,11 @@ impl<S> Default for ChatAdapterLayer<S> {
     }
 }
 
-/// A request to a service wrapped with [ChatAdapterLayer].
-#[derive(Clone)]
-pub struct ChatRequest {
-    pub system_prompt: String,
-    pub messages: Branch,
-    pub tools: Vec<ToolInfo>,
-}
-
 pub type ChatStream = BoxStream<'static, io::Result<ResponseEvent>>;
 
 impl<S, TokenStream> Layer<S> for ChatAdapterLayer<S>
 where
-    S: Service<providers::Request, Response = TokenStream, Error = ProviderError>,
+    S: Service<Request, Response = TokenStream, Error = ProviderError>,
     TokenStream: Stream<Item = io::Result<ResponseEvent>>,
 {
     type Service = ChatAdapterService<S>;
@@ -87,9 +76,9 @@ pub struct ChatAdapterService<S> {
     time_format: Arc<time::format_description::OwnedFormatItem>,
 }
 
-impl<S, TokenStream> Service<ChatRequest> for ChatAdapterService<S>
+impl<S, TokenStream> Service<Request> for ChatAdapterService<S>
 where
-    S: Service<providers::Request, Response = TokenStream, Error = ProviderError>,
+    S: Service<Request, Response = TokenStream, Error = ProviderError>,
     S::Future: Send + 'static,
     TokenStream: Stream<Item = io::Result<ResponseEvent>> + Send + 'static,
 {
@@ -104,63 +93,78 @@ where
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, req: ChatRequest) -> Self::Future {
+    fn call(&mut self, mut req: Request) -> Self::Future {
         let time_format = self.time_format.clone();
         let schema = self.schema.clone();
 
         // Basically the equivalent of a `try` block to build the request, so it can be wrapped into
         // a future afterwards.
         let build_request = move || {
+            let schema_str = serde_json::to_string(schema.as_ref()).map_err(io::Error::other)?;
+
+            // TODO: it's very possible this is horribly inefficient right now
             let history = req
-                .messages
+                .branch()
                 .iter()
                 .collect::<Vec<_>>()
-                .chunk_by(|a, b| a.role == b.role)
-                .map(|chunk| {
-                    let role = chunk[0].role.clone();
-                    let chunk = chunk
-                        .iter()
-                        .map(|msg| {
-                            Ok(UserMessage {
-                                user: msg.user.clone(),
-                                time: msg
-                                    .timestamp
-                                    .format(&time_format)
-                                    .map_err(io::Error::other)?,
-                                content: msg.content.clone(),
-                            })
-                        })
-                        .collect::<Result<Vec<_>, ProviderError>>()?;
-                    let msgs = serde_json::to_string(&chunk).map_err(io::Error::other)?;
-
-                    Ok(LlmMessage {
+                .chunk_by(|a, b| a.is_same_kind(b))
+                .map(|chunk| match &chunk[0] {
+                    crate::session::BranchEntry::Message {
+                        id,
                         role,
-                        message: msgs,
-                    })
+                        timestamp,
+                        ..
+                    } => {
+                        let encoded = chunk
+                            .iter()
+                            .map(|entry| {
+                                let BranchEntry::Message {
+                                    user,
+                                    timestamp,
+                                    content,
+                                    ..
+                                } = entry
+                                else {
+                                    unreachable!();
+                                };
+
+                                Ok(UserMessage {
+                                    user: user.to_owned(),
+                                    time: timestamp
+                                        .format(&time_format)
+                                        .map_err(io::Error::other)?,
+                                    content: content.clone(),
+                                })
+                            })
+                            .collect::<Result<Vec<UserMessage>, ProviderError>>()?;
+
+                        let msgs = serde_json::to_string(&encoded).map_err(io::Error::other)?;
+                        Ok(vec![BranchEntry::Message {
+                            id: *id,
+                            role: role.clone(),
+                            user: None,
+                            timestamp: *timestamp,
+                            content: msgs,
+                        }])
+                    }
+                    _ => Ok(chunk.iter().map(|c| c.to_owned().to_owned()).collect()),
                 })
-                .collect::<Result<Vec<_>, ProviderError>>()?;
+                .collect::<Result<Vec<_>, ProviderError>>()?
+                .into_iter()
+                .flatten()
+                // Wrap the (first) system prompt.
+                .enumerate()
+                .map(|(i, entry)| match (i, entry) {
+                    (0, BranchEntry::System { id, message }) => BranchEntry::System {
+                        id,
+                        message: wrap_system_prompt(false, &schema_str, &message),
+                    },
+                    (_, other) => other,
+                });
 
-            let schema_str = serde_json::to_string(schema.as_ref()).map_err(io::Error::other)?;
-            let mut messages = vec![LlmMessage {
-                role: Role::System,
-                message: wrap_system_prompt(false, &schema_str, &req.system_prompt),
-            }];
-            for msg in history {
-                messages.push(msg);
-            }
+            req.set_branch(Branch::new(history)).set_schema(schema);
 
-            let request = Request {
-                messages,
-                schema: Some(schema.clone()),
-                tools: Vec::new(),
-                tool_mode: if req.tools.is_empty() {
-                    provider::ToolMode::None
-                } else {
-                    provider::ToolMode::Required
-                },
-            };
-
-            Ok(request)
+            Ok(req)
         };
 
         let request = build_request();

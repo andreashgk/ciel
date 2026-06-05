@@ -1,7 +1,7 @@
 use tower::util::BoxCloneService;
 
 use crate::provider::ProviderError;
-use crate::providers;
+use crate::request::Request;
 use crate::session::SessionStore;
 use crate::stream::ResponseStream;
 
@@ -12,7 +12,7 @@ pub struct Context {
     system_prompt: String,
 }
 
-pub type ModelService = BoxCloneService<providers::Request, ResponseStream, ProviderError>;
+pub type ModelService = BoxCloneService<Request, ResponseStream, ProviderError>;
 
 impl Context {
     pub fn new(sessions: SessionStore, provider: ModelService, system_prompt: String) -> Self {

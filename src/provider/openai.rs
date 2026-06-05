@@ -3,14 +3,13 @@ use std::fmt::Debug;
 use std::fmt::Display;
 use std::io;
 use std::ops::Not;
-use std::sync::Arc;
 
 use async_stream::try_stream;
 use async_trait::async_trait;
 use eventsource_stream::Eventsource;
 use futures_util::TryStreamExt;
 use http_body_util::BodyExt;
-use hyper::Request;
+use hyper::Request as HttpRequest;
 use hyper::Response;
 use hyper::body::Incoming;
 use hyper_rustls::HttpsConnector;
@@ -24,7 +23,6 @@ use uuid::Uuid;
 use crate::config::Config;
 use crate::config::ConfigError;
 use crate::provider;
-use crate::provider::LlmMessage;
 use crate::provider::ProviderError;
 use crate::provider::ProviderImpl;
 use crate::provider::openai::models::Error;
@@ -32,18 +30,22 @@ use crate::provider::openai::models::Event;
 use crate::provider::openai::models::FunctionDelta;
 use crate::provider::openai::models::FunctionTool;
 use crate::provider::openai::models::RequestMessage;
+use crate::provider::openai::models::RequestToolCall;
+use crate::provider::openai::models::RequestToolCallType;
 use crate::provider::openai::models::ResponseFormat;
 use crate::provider::openai::models::StreamOptions;
 use crate::provider::openai::models::ToolCallDelta;
 use crate::provider::openai::models::ToolChoice;
 use crate::provider::openai::models::ToolChoiceMode;
 use crate::provider::openai::models::ToolDefinition;
+use crate::request::Request;
+use crate::request::ToolMode;
+use crate::session::Role;
 use crate::stream::ChannelIndex;
 use crate::stream::MessageEvent;
 use crate::stream::ResponseEvent;
 use crate::stream::ResponseStream;
 use crate::stream::ToolEvent;
-use crate::tool::ToolInfo;
 use crate::utils::secret::Secret;
 
 mod models;
@@ -79,38 +81,69 @@ impl OpenAI {
 
 #[async_trait]
 impl ProviderImpl for OpenAI {
-    async fn chat(
-        &self,
-        model: &str,
-        messages: &[LlmMessage],
-        tool_mode: super::ToolMode,
-        tools: &[Arc<ToolInfo>],
-        schema: Option<&serde_json::Value>,
-    ) -> provider::Result<ResponseStream> {
+    async fn chat(&self, request: Request) -> provider::Result<ResponseStream> {
         let url = format!("{}/chat/completions", self.config.base_url);
         let url = url
             .parse::<hyper::Uri>()
             .map_err(|err| format!("invalid base url: {err}"))
             .map_err(ConfigError::Other)?;
 
-        let messages = messages
+        // TODO: assistant messages and tool calls should maybe be merged?
+        let messages = request
+            .branch()
             .iter()
-            .map(|msg| {
-                let role = match msg.role {
-                    crate::provider::Role::System => "system",
-                    crate::provider::Role::Assistant => "assistant",
-                    crate::provider::Role::User => "user",
-                };
-                RequestMessage {
+            .map(|entry| match entry {
+                crate::session::BranchEntry::System { message, .. } => RequestMessage {
                     name: None,
-                    role,
-                    content: &msg.message,
-                }
+                    role: "system",
+                    content: Some(message),
+                    tool_call_id: None,
+                    tool_calls: None,
+                },
+                crate::session::BranchEntry::Message { role, content, .. } => RequestMessage {
+                    name: None,
+                    role: match role {
+                        Role::Assistant => "assistant",
+                        Role::User => "user",
+                    },
+                    content: Some(content.as_str()),
+                    tool_call_id: None,
+                    tool_calls: None,
+                },
+                crate::session::BranchEntry::Tool {
+                    tool_call_id,
+                    name,
+                    arguments,
+                    ..
+                } => RequestMessage {
+                    name: None,
+                    role: "assistant",
+                    content: None,
+                    tool_calls: Some(vec![RequestToolCall {
+                        id: tool_call_id.as_str(),
+                        tool: RequestToolCallType::Function {
+                            arguments: arguments.as_str(),
+                            name: name.as_str(),
+                        },
+                    }]),
+                    tool_call_id: None,
+                },
+                crate::session::BranchEntry::ToolResult {
+                    tool_call_id,
+                    result,
+                    ..
+                } => RequestMessage {
+                    name: None,
+                    role: "tool",
+                    content: Some(result.as_str()),
+                    tool_calls: None,
+                    tool_call_id: Some(tool_call_id.as_str()),
+                },
             })
             .collect::<Vec<_>>();
 
-        let tools = tools
-            .iter()
+        let tools = request
+            .tools()
             .map(|tool| {
                 ToolDefinition::Function(FunctionTool {
                     name: &tool.name,
@@ -123,22 +156,24 @@ impl ProviderImpl for OpenAI {
 
         let req = models::Request {
             messages: &messages,
-            model,
+            model: request
+                .model()
+                .ok_or_else(|| ProviderError::ModelNotFound("(none specified)".to_string()))?,
             max_completion_tokens: None,
             stream: Some(true),
             stream_options: Some(StreamOptions {
                 include_usage: Some(false),
             }),
-            response_format: schema.map(|schema| ResponseFormat {
+            response_format: request.schema().map(|schema| ResponseFormat {
                 r#type: "json_schema",
                 json_schema: Some(schema),
             }),
             reasoning_effort: None,
             tools: &tools,
-            tool_choice: tools.is_empty().not().then_some(match tool_mode {
-                provider::ToolMode::None => ToolChoice::Mode(ToolChoiceMode::None),
-                provider::ToolMode::Auto => ToolChoice::Mode(ToolChoiceMode::Auto),
-                provider::ToolMode::Required => ToolChoice::Mode(ToolChoiceMode::Required),
+            tool_choice: tools.is_empty().not().then_some(match request.tool_mode() {
+                ToolMode::None => ToolChoice::Mode(ToolChoiceMode::None),
+                ToolMode::Auto => ToolChoice::Mode(ToolChoiceMode::Auto),
+                ToolMode::Required => ToolChoice::Mode(ToolChoiceMode::Required),
             }),
         };
 
@@ -152,7 +187,7 @@ impl ProviderImpl for OpenAI {
             }
         };
 
-        let mut req = Request::builder().uri(url).method("POST");
+        let mut req = HttpRequest::builder().uri(url).method("POST");
         if let Some(api_key) = &self.config.api_key {
             req = req.header("Authorization", format!("Bearer {}", api_key.0))
         }
@@ -175,7 +210,7 @@ impl ProviderImpl for OpenAI {
         };
 
         if !res.status().is_success() {
-            return Err(determine_error(res, model).await);
+            return Err(determine_error(res, request.model().unwrap_or("default")).await);
         }
 
         let mut stream = res

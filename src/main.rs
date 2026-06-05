@@ -27,6 +27,7 @@ use crate::provider::ProviderError;
 use crate::provider::ProviderImpl;
 use crate::provider::openai::OpenAI;
 use crate::providers::Providers;
+use crate::request::Request;
 use crate::session::SessionStore;
 use crate::utils::panic_hook;
 
@@ -36,6 +37,7 @@ pub mod context;
 pub mod gateway;
 pub mod provider;
 pub mod providers;
+pub mod request;
 pub mod session;
 pub mod stream;
 pub mod tool;
@@ -124,12 +126,9 @@ async fn do_main(subcommand: Subcommand) -> rootcause::Result<()> {
     let model: String = config.read("model.default.name")?;
 
     let service = ServiceBuilder::new()
-        .map_request(move |req: providers::Request| providers::ProviderRequest {
-            provider: provider.clone(),
-            request: providers::ModelRequest {
-                model: model.clone(),
-                request: req,
-            },
+        .map_request(move |mut req: Request| {
+            req.set_provider(provider.clone()).set_model(model.clone());
+            req
         })
         // Cast the error produced by the timeout layer back to a ProviderError.
         .map_err(|err: BoxError| match err.downcast::<ProviderError>() {

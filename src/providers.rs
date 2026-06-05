@@ -11,13 +11,11 @@ use tower::Service;
 
 use crate::config::Config;
 use crate::provider;
-use crate::provider::LlmMessage;
 use crate::provider::Provider;
 use crate::provider::ProviderCreateFn;
 use crate::provider::ProviderError;
-use crate::provider::ToolMode;
+use crate::request::Request;
 use crate::stream::ResponseStream;
-use crate::tool::ToolInfo;
 
 #[derive(Default, Clone)]
 pub struct Providers {
@@ -58,24 +56,7 @@ impl Providers {
     }
 }
 
-pub struct ProviderRequest {
-    pub provider: String,
-    pub request: ModelRequest,
-}
-
-pub struct ModelRequest {
-    pub model: String,
-    pub request: Request,
-}
-
-pub struct Request {
-    pub messages: Vec<LlmMessage>,
-    pub tools: Vec<Arc<ToolInfo>>,
-    pub tool_mode: ToolMode,
-    pub schema: Option<Arc<serde_json::Value>>,
-}
-
-impl Service<ProviderRequest> for Providers {
+impl Service<Request> for Providers {
     type Response = ResponseStream;
     type Error = ProviderError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
@@ -87,14 +68,15 @@ impl Service<ProviderRequest> for Providers {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: ProviderRequest) -> Self::Future {
-        let provider = self.get(&req.provider).cloned();
+    fn call(&mut self, req: Request) -> Self::Future {
+        // TODO: default provider
+        let provider = req.provider().and_then(|p| self.get(p).cloned());
         handle(provider, req).boxed()
     }
 }
 
 // TODO: dont literally have both here
-impl Service<ProviderRequest> for Arc<Providers> {
+impl Service<Request> for Arc<Providers> {
     type Response = ResponseStream;
     type Error = ProviderError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
@@ -106,33 +88,25 @@ impl Service<ProviderRequest> for Arc<Providers> {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: ProviderRequest) -> Self::Future {
-        let provider = self.get(&req.provider).cloned();
+    fn call(&mut self, req: Request) -> Self::Future {
+        // TODO: default provider
+        let provider = req.provider().and_then(|p| self.get(p).cloned());
         handle(provider, req).boxed()
     }
 }
 
-async fn handle(
-    provider: Option<Provider>,
-    req: ProviderRequest,
-) -> provider::Result<ResponseStream> {
+async fn handle(provider: Option<Provider>, req: Request) -> provider::Result<ResponseStream> {
     let Some(provider) = provider else {
         return Err(ProviderError::IO(io::Error::new(
             io::ErrorKind::NotFound,
-            format!("no such provider: {}", req.provider),
+            format!(
+                "no such provider: {}",
+                req.provider().unwrap_or("(none specified)")
+            ),
         )));
     };
 
-    let req = req.request;
-    provider
-        .chat(
-            &req.model,
-            &req.request.messages,
-            req.request.tool_mode,
-            &req.request.tools,
-            req.request.schema.as_deref(),
-        )
-        .await
+    provider.chat(req).await
 }
 
 #[derive(Debug, Deserialize)]

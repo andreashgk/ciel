@@ -33,8 +33,28 @@ pub struct RequestMessage<'a> {
     /// The role of the messages author, generally one of `assistant`, `developer`, `system`,
     /// `tool` or `user`.
     pub role: &'a str,
-    pub content: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<RequestToolCall<'a>>>,
+    /// The tool call ID that this message corresponds to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<&'a str>,
     // TODO: multi-modal content
+}
+
+#[derive(Debug, Serialize)]
+pub struct RequestToolCall<'a> {
+    /// ID of the tool call.
+    pub id: &'a str,
+    #[serde(flatten)]
+    pub tool: RequestToolCallType<'a>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "type", content = "function", rename_all = "lowercase")]
+pub enum RequestToolCallType<'a> {
+    Function { arguments: &'a str, name: &'a str },
 }
 
 #[derive(Debug, Serialize)]

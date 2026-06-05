@@ -17,12 +17,12 @@ use tower::util::BoxService;
 use tracing::error;
 
 use crate::adapter::chat::ChatAdapterLayer;
-use crate::adapter::chat::ChatRequest;
 use crate::provider::ProviderError;
-use crate::provider::Role;
-use crate::providers::Request;
+use crate::request::Request;
+use crate::session::Branch;
 use crate::session::BranchEntry;
 use crate::session::BranchId;
+use crate::session::Role;
 use crate::session::SessionStore;
 use crate::stream::MessageEvent;
 use crate::stream::ResponseEvent;
@@ -51,7 +51,7 @@ impl Cli {
             };
 
             let now = OffsetDateTime::now_utc();
-            let new_session_entry = BranchEntry {
+            let new_session_entry = BranchEntry::Message {
                 id: BranchId::new_from_time(now),
                 user: None,
                 role: Role::User,
@@ -59,13 +59,20 @@ impl Cli {
                 content: line,
             };
 
+            let system_prompt = self.system_prompt.clone();
+
             let session_identifier = "cli".to_string();
             let mut branch = self
                 .sessions
                 .by_session_id(&session_identifier)
                 .await
                 .context("failed to fetch session")?
-                .unwrap_or_default();
+                .unwrap_or_else(|| {
+                    Branch::new([BranchEntry::System {
+                        id: BranchId::new_from_current_time(),
+                        message: system_prompt.clone(),
+                    }])
+                });
             branch.push(new_session_entry);
 
             // TODO: better way to do this
@@ -73,18 +80,11 @@ impl Cli {
                 branch = branch.sliced(50..);
             }
 
-            let system_prompt = self.system_prompt.clone();
             let branch_clone = branch.clone();
             let mut response_stream = chat
                 .ready()
                 .and_then(|service| async move {
-                    service
-                        .call(ChatRequest {
-                            system_prompt,
-                            messages: branch_clone,
-                            tools: Vec::new(),
-                        })
-                        .await
+                    service.call(Request::from_branch(branch_clone)).await
                 })
                 .await
                 .context("failed to get LLM response")?;
@@ -115,7 +115,7 @@ impl Cli {
                         let now = OffsetDateTime::now_utc();
                         let message_id = BranchId::new_from_time(now);
 
-                        let entry = BranchEntry {
+                        let entry = BranchEntry::Message {
                             id: message_id,
                             user: None,
                             role: Role::Assistant,

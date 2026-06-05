@@ -80,21 +80,21 @@ impl SessionStore {
                 .keyspace(TABLE_MESSAGES, KeyspaceCreateOptions::default)
                 .map_err(io::Error::other)?;
 
-            let mut session_head = entries.entries.front().map(|e| e.id);
+            let mut session_head = entries.entries.front().map(|e| e.id());
 
             // Iterate from newest to oldest entry.
             for idx in (0..entries.entries.len()).rev() {
                 let entry = &entries.entries[idx];
 
                 let entry_bytes = serde_json::to_vec(&SessionEntryContainer {
-                    parent: entries.entries.get(idx.saturating_sub(1)).map(|e| e.id),
+                    parent: entries.entries.get(idx.saturating_sub(1)).map(|e| e.id()),
                     session_head: session_head.take(),
                     content: entry.clone(),
                 })
                 .map_err(io::Error::other)?;
 
                 let previous_value = tx
-                    .fetch_update(&table, entry.id.0.as_bytes(), |_| {
+                    .fetch_update(&table, entry.id().0.as_bytes(), |_| {
                         Some(Slice::new(&entry_bytes))
                     })
                     .map_err(io::Error::other)?;

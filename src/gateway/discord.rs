@@ -31,17 +31,18 @@ use twilight_model::id::Id;
 use twilight_model::id::marker::ChannelMarker;
 
 use crate::adapter::chat::ChatAdapterLayer;
-use crate::adapter::chat::ChatRequest;
 use crate::adapter::chat::ChatStream;
 use crate::config::Config;
 use crate::config::ConfigError;
 use crate::context::Context;
 use crate::gateway::Gateway;
 use crate::gateway::GatewayImpl;
-use crate::provider;
 use crate::provider::ProviderError;
+use crate::request::Request;
+use crate::session::Branch;
 use crate::session::BranchEntry;
 use crate::session::BranchId;
+use crate::session::Role;
 use crate::session::SessionStore;
 use crate::session::UserInfo;
 use crate::stream::MessageEvent;
@@ -152,7 +153,7 @@ impl GatewayImpl for Discord {
 async fn channel_worker(
     mut receiver: QueueMapReceiver<Id<ChannelMarker>, Event>,
     sessions: SessionStore,
-    mut chat: impl Service<ChatRequest, Response = ChatStream, Error = ProviderError>,
+    mut chat: impl Service<Request, Response = ChatStream, Error = ProviderError>,
     system_prompt: String,
     http: Arc<Client>,
 ) -> rootcause::Result<()> {
@@ -177,7 +178,12 @@ async fn channel_worker(
         let mut branch = sessions
             .by_session_id(&session_identifier)
             .await?
-            .unwrap_or_default();
+            .unwrap_or_else(|| {
+                Branch::new([BranchEntry::System {
+                    id: BranchId::new_from_current_time(),
+                    message: system_prompt.clone(),
+                }])
+            });
 
         for event in events.drain(..) {
             let Event::MessageCreate(message_create) = &event else {
@@ -195,13 +201,13 @@ async fn channel_worker(
                 .and_then(|m| m.nick.clone())
                 .or(message_create.author.global_name.as_ref().cloned());
 
-            let new_session_entry = BranchEntry {
+            let new_session_entry = BranchEntry::Message {
                 id: BranchId::new_from_time(timestamp),
                 user: Some(UserInfo {
                     nickname,
                     username: message_create.author.name.clone(),
                 }),
-                role: provider::Role::User,
+                role: Role::User,
                 timestamp: timestamp.to_utc(),
                 content: message_create.content.clone(),
             };
@@ -218,13 +224,7 @@ async fn channel_worker(
         // TODO: properly handle this error by giving some feedback in the channel
         let service = chat.ready().await?;
         // TODO: properly handle this error by giving some feedback in the channel
-        let mut response_stream = service
-            .call(ChatRequest {
-                system_prompt: system_prompt.clone(),
-                messages: branch.clone(),
-                tools: Vec::new(),
-            })
-            .await?;
+        let mut response_stream = service.call(Request::from_branch(branch.clone())).await?;
 
         let mut last_sent = None;
         // The bot simulates typing at 150 wpm.
@@ -287,10 +287,10 @@ async fn channel_worker(
                             .await?;
                     }
 
-                    let entry = BranchEntry {
+                    let entry = BranchEntry::Message {
                         id: message_id,
                         user: None,
-                        role: provider::Role::Assistant,
+                        role: Role::Assistant,
                         timestamp: now.to_utc(),
                         content: msg,
                     };

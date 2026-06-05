@@ -5,29 +5,19 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures_core::future::BoxFuture;
-use serde::Deserialize;
-use serde::Serialize;
-use serde_json::Value;
 use thiserror::Error;
 use tracing::instrument;
 
 use crate::config::Config;
 use crate::config::ConfigError;
+use crate::request::Request;
 use crate::stream::ResponseStream;
-use crate::tool::ToolInfo;
 
 pub mod openai;
 
 #[async_trait]
 pub trait ProviderImpl: Display + Debug + Send + Sync {
-    async fn chat(
-        &self,
-        model: &str,
-        messages: &[LlmMessage],
-        tool_mode: ToolMode,
-        tools: &[Arc<ToolInfo>],
-        schema: Option<&Value>,
-    ) -> Result<ResponseStream>;
+    async fn chat(&self, request: Request) -> Result<ResponseStream>;
 }
 
 pub type ProviderCreateFn =
@@ -41,40 +31,10 @@ impl Provider {
         Self(provider)
     }
 
-    #[instrument(fields(provider = %self, %model), skip(self, messages, schema))]
-    pub async fn chat(
-        &self,
-        model: &str,
-        messages: &[LlmMessage],
-        tool_mode: ToolMode,
-        tools: &[Arc<ToolInfo>],
-        schema: Option<&Value>,
-    ) -> Result<ResponseStream> {
-        self.0
-            .chat(model, messages, tool_mode, tools, schema)
-            .await
-            .map(|s| s.instrumented())
+    #[instrument(fields(provider = %self, model = %request.model().unwrap_or("/")), skip(self, request))]
+    pub async fn chat(&self, request: Request) -> Result<ResponseStream> {
+        self.0.chat(request).await.map(|s| s.instrumented())
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct LlmMessage {
-    pub role: Role,
-    pub message: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum Role {
-    System,
-    Assistant,
-    User,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ToolMode {
-    None,
-    Auto,
-    Required,
 }
 
 pub type Result<V> = std::result::Result<V, ProviderError>;
