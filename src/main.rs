@@ -31,6 +31,8 @@ use crate::provider::openai::OpenAI;
 use crate::providers::Providers;
 use crate::request::Request;
 use crate::session::SessionStore;
+use crate::tool::Tool;
+use crate::tool::terminal::TerminalTool;
 use crate::utils::panic_hook;
 
 pub mod adapter;
@@ -127,8 +129,15 @@ async fn do_main(subcommand: Subcommand) -> rootcause::Result<()> {
     let provider: String = config.read::<String>("model.default.provider")?;
     let model: String = config.read("model.default.name")?;
 
+    let mut tools = Vec::new();
+    if config.read_value("tool.terminal").is_some() {
+        tools.push(Tool::new(TerminalTool::new(
+            config.scoped("tool.terminal"),
+        )?));
+    }
+
     let service = ServiceBuilder::new()
-        .layer(ToolAdapterLayer::default())
+        .layer(ToolAdapterLayer::default().with_tools(tools))
         .layer(ChatAdapterLayer::default())
         .map_request(move |mut req: Request| {
             req.set_provider(provider.clone()).set_model(model.clone());
