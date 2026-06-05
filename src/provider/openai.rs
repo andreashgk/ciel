@@ -175,6 +175,7 @@ impl ProviderImpl for OpenAI {
                 ToolMode::Auto => ToolChoice::Mode(ToolChoiceMode::Auto),
                 ToolMode::Required => ToolChoice::Mode(ToolChoiceMode::Required),
             }),
+            parallel_tool_calls: Some(true),
         };
 
         let body = match serde_json::to_string(&req) {
