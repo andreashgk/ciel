@@ -5,6 +5,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use fjall::SingleWriterTxDatabase;
+use reverie_adapter::chat_adapter::ChatAdapterLayer;
+use reverie_adapter::tool_adapter::ToolAdapterLayer;
+use reverie_core::config::Config;
+use reverie_core::gateway::Gateways;
+use reverie_core::provider::ProviderError;
+use reverie_core::provider::ProviderImpl;
+use reverie_core::provider::request::Request;
+use reverie_core::session::store::SessionStore;
+use reverie_core::tool::Tool;
+use reverie_openai::OpenAI;
+use reverie_util::panic_hook;
 use rootcause::prelude::ResultExt;
 use rootcause_tracing::RootcauseLayer;
 use tokio::io;
@@ -20,32 +31,13 @@ use tracing_subscriber::Layer;
 use tracing_subscriber::Registry;
 use tracing_subscriber::layer::SubscriberExt;
 
-use crate::adapter::chat::ChatAdapterLayer;
-use crate::adapter::tool::ToolAdapterLayer;
-use crate::config::Config;
-use crate::gateway::Gateways;
-use crate::gateway::cli::Cli;
-use crate::provider::ProviderError;
-use crate::provider::ProviderImpl;
-use crate::provider::openai::OpenAI;
+use crate::cli::Cli;
 use crate::providers::Providers;
-use crate::request::Request;
-use crate::session::SessionStore;
-use crate::tool::Tool;
 use crate::tool::terminal::TerminalTool;
-use crate::utils::panic_hook;
 
-pub mod adapter;
-pub mod config;
-pub mod context;
-pub mod gateway;
-pub mod provider;
+pub mod cli;
 pub mod providers;
-pub mod request;
-pub mod session;
-pub mod stream;
 pub mod tool;
-pub mod utils;
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -172,7 +164,7 @@ async fn do_main(subcommand: Subcommand) -> rootcause::Result<()> {
         Subcommand::None => {
             let mut gateways = Gateways::default();
             #[cfg(feature = "discord")]
-            gateways.register("discord", gateway::discord::Discord::factory);
+            gateways.register("discord", reverie_discord::Discord::factory);
             gateways
                 .load(config.scoped("gateway"))
                 .context("failed to load gateways")?;

@@ -1,21 +1,19 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::io;
-use std::sync::Arc;
 use std::task::Poll;
 
 use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
+use reverie_core::config::Config;
+use reverie_core::provider;
+use reverie_core::provider::Provider;
+use reverie_core::provider::ProviderCreateFn;
+use reverie_core::provider::ProviderError;
+use reverie_core::provider::request::Request;
+use reverie_core::provider::response::ResponseStream;
 use serde::Deserialize;
 use tower::Service;
-
-use crate::config::Config;
-use crate::provider;
-use crate::provider::Provider;
-use crate::provider::ProviderCreateFn;
-use crate::provider::ProviderError;
-use crate::request::Request;
-use crate::stream::ResponseStream;
 
 #[derive(Default, Clone)]
 pub struct Providers {
@@ -57,26 +55,6 @@ impl Providers {
 }
 
 impl Service<Request> for Providers {
-    type Response = ResponseStream;
-    type Error = ProviderError;
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, req: Request) -> Self::Future {
-        // TODO: default provider
-        let provider = req.provider().and_then(|p| self.get(p).cloned());
-        handle(provider, req).boxed()
-    }
-}
-
-// TODO: dont literally have both here
-impl Service<Request> for Arc<Providers> {
     type Response = ResponseStream;
     type Error = ProviderError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;

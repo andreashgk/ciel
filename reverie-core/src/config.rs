@@ -7,9 +7,11 @@ use std::sync::Arc;
 use serde::Deserialize;
 use thiserror::Error;
 use tokio::fs;
-use toml::Value;
 use toml::map::Map;
 use tracing::debug;
+
+pub use toml::Table;
+pub use toml::Value;
 
 #[derive(Clone)]
 pub struct Config {

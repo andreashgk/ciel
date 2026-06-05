@@ -7,13 +7,12 @@ use actson::feeder::PushJsonFeeder;
 use async_stream::try_stream;
 use futures_core::Stream;
 use futures_util::TryStreamExt;
+use reverie_core::provider::response::ChannelIndex;
+use reverie_core::provider::response::MessageEvent;
+use reverie_core::provider::response::ResponseEvent;
+use reverie_core::provider::response::ToolEvent;
 use tokio::pin;
 use uuid::Uuid;
-
-use crate::stream::ChannelIndex;
-use crate::stream::MessageEvent;
-use crate::stream::ResponseEvent;
-use crate::stream::ToolEvent;
 
 pub fn parse_token_stream(
     tools: bool,

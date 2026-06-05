@@ -812,21 +812,54 @@ checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 name = "reverie"
 version = "0.1.0"
 dependencies = [
- "actson",
- "async-stream",
  "async-trait",
- "dashmap",
- "eventsource-stream",
  "fjall",
  "futures-core",
  "futures-util",
- "http-body-util",
- "hyper",
- "hyper-rustls",
- "hyper-util",
  "nu-ansi-term",
+ "reverie-adapter",
+ "reverie-core",
+ "reverie-discord",
+ "reverie-openai",
+ "reverie-util",
  "rootcause",
  "rootcause-tracing",
+ "serde",
+ "serde_json",
+ "time",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "reverie-adapter"
+version = "0.1.0"
+dependencies = [
+ "actson",
+ "async-stream",
+ "futures-core",
+ "futures-util",
+ "reverie-core",
+ "serde",
+ "serde_json",
+ "time",
+ "tokio",
+ "tower",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "reverie-core"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "fjall",
+ "futures-core",
+ "futures-util",
+ "rootcause",
  "serde",
  "serde_json",
  "thiserror",
@@ -835,11 +868,56 @@ dependencies = [
  "toml",
  "tower",
  "tracing",
- "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "reverie-discord"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "futures-util",
+ "reverie-core",
+ "reverie-util",
+ "rootcause",
+ "serde",
+ "time",
+ "tokio",
+ "tower",
+ "tracing",
  "twilight-gateway",
  "twilight-http",
  "twilight-model",
+]
+
+[[package]]
+name = "reverie-openai"
+version = "0.1.0"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "eventsource-stream",
+ "futures-util",
+ "http-body-util",
+ "hyper",
+ "hyper-rustls",
+ "hyper-util",
+ "reverie-core",
+ "reverie-util",
+ "serde",
+ "serde_json",
+ "tracing",
  "uuid",
+]
+
+[[package]]
+name = "reverie-util"
+version = "0.1.0"
+dependencies = [
+ "dashmap",
+ "serde",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

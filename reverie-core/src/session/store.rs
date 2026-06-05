@@ -11,8 +11,9 @@ use serde::Serialize;
 use tokio::task;
 use uuid::Uuid;
 
-mod branch;
-pub use branch::*;
+use crate::session::branch::Branch;
+use crate::session::branch::BranchEntry;
+use crate::session::branch::BranchId;
 
 const TABLE_MESSAGES: &str = "sessions/messages";
 const TABLE_SESSION_MAP: &str = "sessions/id-mapping";

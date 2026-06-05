@@ -9,21 +9,21 @@ use futures_core::future::BoxFuture;
 use futures_core::stream::BoxStream;
 use futures_util::FutureExt;
 use futures_util::StreamExt;
+use reverie_core::provider;
+use reverie_core::provider::ProviderError;
+use reverie_core::provider::request::Request;
+use reverie_core::provider::request::ToolMode;
+use reverie_core::provider::response::ResponseEvent;
+use reverie_core::session::branch::Branch;
+use reverie_core::session::branch::BranchEntry;
+use reverie_core::session::branch::UserInfo;
+use reverie_core::tool::ToolInfo;
 use serde::Serialize;
 use time::format_description::parse_owned;
 use tower::Layer;
 use tower::Service;
 
-use crate::adapter::chat::stream::parse_token_stream;
-use crate::provider;
-use crate::provider::ProviderError;
-use crate::request::Request;
-use crate::request::ToolMode;
-use crate::session::Branch;
-use crate::session::BranchEntry;
-use crate::session::UserInfo;
-use crate::stream::ResponseEvent;
-use crate::tool::ToolInfo;
+use crate::chat_adapter::stream::parse_token_stream;
 
 /// Chat layer on top of an LLM service, oriented for conversational text chats.
 ///
@@ -38,7 +38,7 @@ pub struct ChatAdapterLayer<S> {
 
 impl<S> Default for ChatAdapterLayer<S> {
     fn default() -> Self {
-        let schema = include_str!("chat/schema.json");
+        let schema = include_str!("chat_adapter/schema.json");
         let schema = serde_json::from_str(schema).expect("valid schema");
 
         let time_format = parse_owned::<2>("[year]-[month]-[day] [hour]:[minute]")
@@ -112,7 +112,7 @@ where
                 .collect::<Vec<_>>()
                 .chunk_by(|a, b| a.is_same_kind(b))
                 .map(|chunk| match &chunk[0] {
-                    crate::session::BranchEntry::Message {
+                    BranchEntry::Message {
                         id,
                         role,
                         timestamp,
@@ -207,9 +207,9 @@ struct UserMessage {
 
 fn wrap_system_prompt(tools: bool, schema_str: &str, original_prompt: &str) -> String {
     let prompt = if tools {
-        include_str!("chat/prompt_tools.md")
+        include_str!("chat_adapter/prompt_tools.md")
     } else {
-        include_str!("chat/prompt_notools.md")
+        include_str!("chat_adapter/prompt_notools.md")
     };
     let prompt = prompt.replace("$SCHEMA", schema_str);
     format!("{original_prompt}\n{prompt}")

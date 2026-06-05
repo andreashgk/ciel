@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
-use crate::session::Branch;
+use crate::session::branch::Branch;
 use crate::tool::ToolInfo;
 
 #[derive(Clone)]

@@ -1,9 +1,9 @@
 use tower::util::BoxCloneService;
 
 use crate::provider::ProviderError;
-use crate::request::Request;
-use crate::session::SessionStore;
-use crate::stream::ResponseStream;
+use crate::provider::request::Request;
+use crate::provider::response::ResponseStream;
+use crate::session::store::SessionStore;
 
 #[derive(Clone)]
 pub struct Context {

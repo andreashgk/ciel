@@ -16,11 +16,7 @@ use crate::config::Config;
 use crate::config::ConfigError;
 use crate::context::Context;
 use crate::context::ModelService;
-use crate::session::SessionStore;
-
-pub mod cli;
-#[cfg(feature = "discord")]
-pub mod discord;
+use crate::session::store::SessionStore;
 
 #[async_trait]
 pub trait GatewayImpl {

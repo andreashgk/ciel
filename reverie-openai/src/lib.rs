@@ -16,37 +16,38 @@ use hyper_rustls::HttpsConnector;
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
+use reverie_core::config::Config;
+use reverie_core::config::ConfigError;
+use reverie_core::provider;
+use reverie_core::provider::ProviderError;
+use reverie_core::provider::ProviderImpl;
+use reverie_core::provider::request::Request;
+use reverie_core::provider::request::ToolMode;
+use reverie_core::provider::response::ChannelIndex;
+use reverie_core::provider::response::MessageEvent;
+use reverie_core::provider::response::ResponseEvent;
+use reverie_core::provider::response::ResponseStream;
+use reverie_core::provider::response::ToolEvent;
+use reverie_core::session::branch::BranchEntry;
+use reverie_core::session::branch::Role;
+use reverie_util::secret::Secret;
 use serde::Deserialize;
 use tracing::error;
 use uuid::Uuid;
 
-use crate::config::Config;
-use crate::config::ConfigError;
-use crate::provider;
-use crate::provider::ProviderError;
-use crate::provider::ProviderImpl;
-use crate::provider::openai::models::Error;
-use crate::provider::openai::models::Event;
-use crate::provider::openai::models::FunctionDelta;
-use crate::provider::openai::models::FunctionTool;
-use crate::provider::openai::models::RequestMessage;
-use crate::provider::openai::models::RequestToolCall;
-use crate::provider::openai::models::RequestToolCallType;
-use crate::provider::openai::models::ResponseFormat;
-use crate::provider::openai::models::StreamOptions;
-use crate::provider::openai::models::ToolCallDelta;
-use crate::provider::openai::models::ToolChoice;
-use crate::provider::openai::models::ToolChoiceMode;
-use crate::provider::openai::models::ToolDefinition;
-use crate::request::Request;
-use crate::request::ToolMode;
-use crate::session::Role;
-use crate::stream::ChannelIndex;
-use crate::stream::MessageEvent;
-use crate::stream::ResponseEvent;
-use crate::stream::ResponseStream;
-use crate::stream::ToolEvent;
-use crate::utils::secret::Secret;
+use crate::models::Error;
+use crate::models::Event;
+use crate::models::FunctionDelta;
+use crate::models::FunctionTool;
+use crate::models::RequestMessage;
+use crate::models::RequestToolCall;
+use crate::models::RequestToolCallType;
+use crate::models::ResponseFormat;
+use crate::models::StreamOptions;
+use crate::models::ToolCallDelta;
+use crate::models::ToolChoice;
+use crate::models::ToolChoiceMode;
+use crate::models::ToolDefinition;
 
 mod models;
 
@@ -93,14 +94,14 @@ impl ProviderImpl for OpenAI {
             .branch()
             .iter()
             .map(|entry| match entry {
-                crate::session::BranchEntry::System { message, .. } => RequestMessage {
+                BranchEntry::System { message, .. } => RequestMessage {
                     name: None,
                     role: "system",
                     content: Some(message),
                     tool_call_id: None,
                     tool_calls: None,
                 },
-                crate::session::BranchEntry::Message { role, content, .. } => RequestMessage {
+                BranchEntry::Message { role, content, .. } => RequestMessage {
                     name: None,
                     role: match role {
                         Role::Assistant => "assistant",
@@ -110,7 +111,7 @@ impl ProviderImpl for OpenAI {
                     tool_call_id: None,
                     tool_calls: None,
                 },
-                crate::session::BranchEntry::Tool {
+                BranchEntry::Tool {
                     tool_call_id,
                     name,
                     arguments,
@@ -128,7 +129,7 @@ impl ProviderImpl for OpenAI {
                     }]),
                     tool_call_id: None,
                 },
-                crate::session::BranchEntry::ToolResult {
+                BranchEntry::ToolResult {
                     tool_call_id,
                     result,
                     ..

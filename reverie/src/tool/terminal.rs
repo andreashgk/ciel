@@ -2,17 +2,16 @@ use std::process::Stdio;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use reverie_core::config::Config;
+use reverie_core::config::ConfigError;
+use reverie_core::tool::ToolImpl;
+use reverie_core::tool::ToolInfo;
 use rootcause::option_ext::OptionExt;
 use rootcause::prelude::ResultExt;
 use serde::Deserialize;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::BufReader;
 use tokio::sync::mpsc;
-
-use crate::config::Config;
-use crate::config::ConfigError;
-use crate::tool::ToolImpl;
-use crate::tool::ToolInfo;
 
 /// Allows the agent to run commands over SSH.
 #[derive(Clone)]

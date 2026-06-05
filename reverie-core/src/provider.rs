@@ -1,3 +1,7 @@
+pub mod request;
+pub mod response;
+pub mod tool;
+
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::io;
@@ -10,10 +14,8 @@ use tracing::instrument;
 
 use crate::config::Config;
 use crate::config::ConfigError;
-use crate::request::Request;
-use crate::stream::ResponseStream;
-
-pub mod openai;
+use crate::provider::request::Request;
+use crate::provider::response::ResponseStream;
 
 #[async_trait]
 pub trait ProviderImpl: Display + Debug + Send + Sync {

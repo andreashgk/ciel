@@ -1,7 +1,8 @@
 [workspace]
 resolver = "3"
 members = [
-    "reverie"
+    "reverie",
+    "reverie-*/",
 ]
 
 [profile.release]
@@ -9,6 +10,12 @@ opt-level = "s"
 strip = true
 
 [workspace.dependencies]
+reverie-adapter.path = "reverie-adapter"
+reverie-core.path = "reverie-core"
+reverie-discord.path = "reverie-discord"
+reverie-openai.path = "reverie-openai"
+reverie-util.path = "reverie-util"
+
 actson = "2.1.0"
 async-stream = "0.3.6"
 async-trait = "0.1.89"

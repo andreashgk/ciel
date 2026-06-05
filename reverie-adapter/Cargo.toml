@@ -1,0 +1,18 @@
+[package]
+name = "reverie-adapter"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+actson.workspace = true
+async-stream.workspace = true
+futures-core.workspace = true
+futures-util.workspace = true
+reverie-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+time.workspace = true
+tokio.workspace = true
+tower.workspace = true
+tracing.workspace = true
+uuid.workspace = true
