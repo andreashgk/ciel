@@ -20,6 +20,8 @@ use tracing_subscriber::Layer;
 use tracing_subscriber::Registry;
 use tracing_subscriber::layer::SubscriberExt;
 
+use crate::adapter::chat::ChatAdapterLayer;
+use crate::adapter::tool::ToolAdapterLayer;
 use crate::config::Config;
 use crate::gateway::Gateways;
 use crate::gateway::cli::Cli;
@@ -29,6 +31,8 @@ use crate::provider::openai::OpenAI;
 use crate::providers::Providers;
 use crate::request::Request;
 use crate::session::SessionStore;
+use crate::tool::TestTool;
+use crate::tool::Tool;
 use crate::utils::panic_hook;
 
 pub mod adapter;
@@ -126,6 +130,8 @@ async fn do_main(subcommand: Subcommand) -> rootcause::Result<()> {
     let model: String = config.read("model.default.name")?;
 
     let service = ServiceBuilder::new()
+        .layer(ToolAdapterLayer::default().with_tool(Tool::new(TestTool::default())))
+        .layer(ChatAdapterLayer::default())
         .map_request(move |mut req: Request| {
             req.set_provider(provider.clone()).set_model(model.clone());
             req

@@ -11,12 +11,10 @@ use rootcause::option_ext::OptionExt;
 use rootcause::prelude::ResultExt;
 use time::OffsetDateTime;
 use tower::Service;
-use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower::util::BoxService;
 use tracing::error;
 
-use crate::adapter::chat::ChatAdapterLayer;
 use crate::provider::ProviderError;
 use crate::request::Request;
 use crate::session::Branch;
@@ -36,9 +34,7 @@ pub struct Cli {
 
 impl Cli {
     pub async fn run(self) -> rootcause::Result<()> {
-        let mut chat = ServiceBuilder::new()
-            .layer(ChatAdapterLayer::default())
-            .service(self.service);
+        let mut chat = self.service;
 
         let mut stdin = stdin().lines();
         let mut stdout = stdout();

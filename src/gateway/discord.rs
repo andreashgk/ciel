@@ -11,7 +11,6 @@ use time::OffsetDateTime;
 use tokio::time::Instant;
 use tokio::time::sleep_until;
 use tower::Service;
-use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tracing::Instrument;
 use tracing::Level;
@@ -30,8 +29,6 @@ use twilight_model::channel::message::AllowedMentions;
 use twilight_model::id::Id;
 use twilight_model::id::marker::ChannelMarker;
 
-use crate::adapter::chat::ChatAdapterLayer;
-use crate::adapter::tool::ToolAdapterLayer;
 use crate::config::Config;
 use crate::config::ConfigError;
 use crate::context::Context;
@@ -50,8 +47,6 @@ use crate::stream::ResponseEvent;
 use crate::stream::ResponseStream;
 use crate::stream::ToolEvent;
 use crate::stream::ToolResultEvent;
-use crate::tool::TestTool;
-use crate::tool::Tool;
 use crate::utils::queue_map::QueueMap;
 use crate::utils::queue_map::QueueMapReceiver;
 use crate::utils::secret::Secret;
@@ -92,11 +87,7 @@ impl GatewayImpl for Discord {
 
         tokio::spawn(async move {
             let sessions = ctx.sessions().clone();
-            let model = ctx.model().clone();
-            let chat = ServiceBuilder::new()
-                .layer(ToolAdapterLayer::default().with_tool(Tool::new(TestTool::default())))
-                .layer(ChatAdapterLayer::default())
-                .service(model);
+            let chat = ctx.model().clone();
 
             let mut shard = Shard::new(
                 ShardId::ONE,
