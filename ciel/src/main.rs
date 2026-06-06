@@ -17,7 +17,6 @@ use fjall::SingleWriterTxDatabase;
 use rootcause::prelude::ResultExt;
 use rootcause_tracing::RootcauseLayer;
 use tokio::io;
-use tokio::signal::ctrl_c;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -164,7 +163,7 @@ async fn do_main(subcommand: Subcommand) -> rootcause::Result<()> {
                 .run_all(sessions, service.clone().boxed_clone(), system_prompt)
                 .await?;
 
-            ctrl_c().await?;
+            await_exit_signal().await?;
             info!("exiting");
 
             // TODO: graceful gateway shutdown
@@ -172,4 +171,27 @@ async fn do_main(subcommand: Subcommand) -> rootcause::Result<()> {
     }
 
     Ok(())
+}
+
+/// Helper function to listen for an exit signal regardless of platform.
+async fn await_exit_signal() -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use tokio::select;
+        use tokio::signal::unix::SignalKind;
+        use tokio::signal::unix::signal;
+
+        let mut sigterm = signal(SignalKind::terminate())?;
+        let mut sigint = signal(SignalKind::interrupt())?;
+        select! {
+            _ = sigterm.recv() => Ok(()),
+            _ = sigint.recv() => Ok(()),
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        use tokio::signal;
+
+        signal::ctrl_c().await
+    }
 }
