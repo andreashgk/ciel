@@ -27,6 +27,8 @@ struct TerminalConfig {
     ssh_host: String,
     ssh_port: Option<u16>,
     ssh_path: Option<String>,
+    /// Specifies the [OpenSSH Control Path](https://man.openbsd.org/ssh_config#ControlPath).
+    ssh_control_path: Option<String>,
 }
 
 impl TerminalTool {
@@ -82,7 +84,20 @@ async fn do_tool(
     let schema: Schema = serde_json::from_str(args).context("failed to parse arguments")?;
     debug!(command = %schema.command, "terminal tool is being called");
 
+    let control_path = cfg
+        .ssh_control_path
+        .as_deref()
+        .unwrap_or("ControlPath=/tmp/ssh-%C");
+
     let mut child = tokio::process::Command::new(cfg.ssh_path.as_deref().unwrap_or("ssh"))
+        .arg("-o")
+        // Sets up multiplexing to hosts automatically and prevents the SSH handshake from having to
+        // be executed for every invocation.
+        .arg("ControlMaster=auto")
+        .arg("-o")
+        .arg(control_path)
+        .arg("-o")
+        .arg("ControlPersist=5m")
         .arg("-p")
         .arg(format!("{}", cfg.ssh_port.unwrap_or(22)))
         .arg(&cfg.ssh_host)
