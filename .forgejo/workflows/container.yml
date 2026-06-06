@@ -1,0 +1,66 @@
+name: Container
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    env:
+      STORAGE_DRIVER: vfs
+      BUILDAH_ISOLATION: chroot
+
+    steps:
+      - uses: actions/checkout@v5
+      - uses: cachix/install-nix-action@v31
+
+      - name: Install devenv
+        run: nix profile install nixpkgs#devenv
+
+      - name: Setup container policy
+        run: |
+          sudo mkdir -p /etc/containers
+          cat << 'EOF' | sudo tee /etc/containers/policy.json > /dev/null
+          {
+              "default": [
+                  {
+                      "type": "insecureAcceptAnything"
+                  }
+              ]
+          }
+          EOF
+
+          # Force VFS storage driver globally
+          cat << 'EOF' | sudo tee /etc/containers/storage.conf > /dev/null
+          [storage]
+          driver = "vfs"
+          EOF
+
+          # Force chroot isolation globally
+          cat << 'EOF' | sudo tee /etc/containers/containers.conf > /dev/null
+          [engine]
+          isolation = "chroot"
+          EOF
+
+      - name: Build container image
+        shell: devenv shell bash -- -e {0}
+        run: STORAGE_DRIVER=vfs BUILDAH_ISOLATION=chroot build-oci-image
+
+      - name: Push container image
+        shell: devenv shell bash -- -e {0}
+        run: |
+          IMAGE_TAG=$(echo "${{ github.ref_name }}" | sed 's/[^a-zA-Z0-9._-]/-/g' | tr '[:upper:]' '[:lower:]')
+          echo "Using sanitized branch name: $IMAGE_TAG"
+
+          buildah push \
+            --format oci \
+            --creds "${{ github.actor }}:${{ secrets.REGISTRY_TOKEN }}" \
+            ciel:dev \
+            docker://git.hgk.me/${{ github.repository }}:${IMAGE_TAG}
