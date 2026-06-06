@@ -12,6 +12,7 @@ use serde::Deserialize;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::BufReader;
 use tokio::sync::mpsc;
+use tracing::debug;
 
 /// Allows the agent to run commands over SSH.
 #[derive(Clone)]
@@ -79,7 +80,7 @@ async fn do_tool(
     output: mpsc::Sender<String>,
 ) -> rootcause::Result<()> {
     let schema: Schema = serde_json::from_str(args).context("failed to parse arguments")?;
-    println!("{}", schema.command);
+    debug!(command = %schema.command, "terminal tool is being called");
 
     let mut child = tokio::process::Command::new(cfg.ssh_path.as_deref().unwrap_or("ssh"))
         .arg("-p")
