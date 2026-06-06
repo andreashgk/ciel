@@ -1,0 +1,19 @@
+[package]
+name = "ciel-discord"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+async-trait.workspace = true
+ciel-core.workspace = true
+ciel-util.workspace = true
+futures-util.workspace = true
+rootcause.workspace = true
+serde.workspace = true
+time.workspace = true
+tokio.workspace = true
+tower.workspace = true
+tracing.workspace = true
+twilight-gateway.workspace = true
+twilight-http.workspace = true
+twilight-model.workspace = true

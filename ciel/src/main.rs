@@ -3,17 +3,17 @@ use std::panic;
 use std::process::ExitCode;
 use std::time::Duration;
 
+use ciel_adapter::chat_adapter::ChatAdapterLayer;
+use ciel_adapter::tool_adapter::ToolAdapterLayer;
+use ciel_core::config::Config;
+use ciel_core::gateway::Gateways;
+use ciel_core::provider::ProviderError;
+use ciel_core::provider::request::Request;
+use ciel_core::session::store::SessionStore;
+use ciel_core::tool::Tool;
+use ciel_openai::OpenAI;
+use ciel_util::panic_hook;
 use fjall::SingleWriterTxDatabase;
-use reverie_adapter::chat_adapter::ChatAdapterLayer;
-use reverie_adapter::tool_adapter::ToolAdapterLayer;
-use reverie_core::config::Config;
-use reverie_core::gateway::Gateways;
-use reverie_core::provider::ProviderError;
-use reverie_core::provider::request::Request;
-use reverie_core::session::store::SessionStore;
-use reverie_core::tool::Tool;
-use reverie_openai::OpenAI;
-use reverie_util::panic_hook;
 use rootcause::prelude::ResultExt;
 use rootcause_tracing::RootcauseLayer;
 use tokio::io;
@@ -40,9 +40,8 @@ pub mod tool;
 #[tokio::main]
 async fn main() -> ExitCode {
     let subscriber = Registry::default().with(RootcauseLayer).with(
-        tracing_subscriber::fmt::layer().with_filter(EnvFilter::new(
-            "info,reverie=debug,fjall=warn,lsm_tree=warn",
-        )),
+        tracing_subscriber::fmt::layer()
+            .with_filter(EnvFilter::new("info,ciel=debug,fjall=warn,lsm_tree=warn")),
     );
 
     tracing::subscriber::set_global_default(subscriber).expect("failed to set subscriber");
@@ -157,7 +156,7 @@ async fn do_main(subcommand: Subcommand) -> rootcause::Result<()> {
         Subcommand::None => {
             let mut gateways = Gateways::default();
             #[cfg(feature = "discord")]
-            gateways.register("discord", reverie_discord::Discord::factory);
+            gateways.register("discord", ciel_discord::Discord::factory);
             gateways
                 .load(config.scoped("gateway"))
                 .context("failed to load gateways")?;

@@ -1,19 +1,19 @@
 [package]
-name = "reverie"
+name = "ciel"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 async-trait.workspace = true
+ciel-adapter.workspace = true
+ciel-core.workspace = true
+ciel-discord = { workspace = true, optional = true }
+ciel-openai.workspace = true
+ciel-util.workspace = true
 fjall.workspace = true
 futures-core.workspace = true
 futures-util.workspace = true
 nu-ansi-term.workspace = true
-reverie-adapter.workspace = true
-reverie-core.workspace = true
-reverie-discord = { workspace = true, optional = true }
-reverie-openai.workspace = true
-reverie-util.workspace = true
 rootcause.workspace = true
 rootcause-tracing.workspace = true
 serde.workspace = true
@@ -26,4 +26,4 @@ tracing-subscriber.workspace = true
 
 [features]
 default = ["discord"]
-discord = ["dep:reverie-discord"]
+discord = ["dep:ciel-discord"]

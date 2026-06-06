@@ -2,10 +2,10 @@ use std::process::Stdio;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use reverie_core::config::Config;
-use reverie_core::config::ConfigError;
-use reverie_core::tool::ToolImpl;
-use reverie_core::tool::ToolInfo;
+use ciel_core::config::Config;
+use ciel_core::config::ConfigError;
+use ciel_core::tool::ToolImpl;
+use ciel_core::tool::ToolInfo;
 use rootcause::option_ext::OptionExt;
 use rootcause::prelude::ResultExt;
 use serde::Deserialize;

@@ -3,15 +3,15 @@ use std::collections::HashMap;
 use std::io;
 use std::task::Poll;
 
+use ciel_core::config::Config;
+use ciel_core::provider;
+use ciel_core::provider::Provider;
+use ciel_core::provider::ProviderError;
+use ciel_core::provider::ProviderFactory;
+use ciel_core::provider::request::Request;
+use ciel_core::provider::response::ResponseStream;
 use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
-use reverie_core::config::Config;
-use reverie_core::provider;
-use reverie_core::provider::Provider;
-use reverie_core::provider::ProviderError;
-use reverie_core::provider::ProviderFactory;
-use reverie_core::provider::request::Request;
-use reverie_core::provider::response::ResponseStream;
 use serde::Deserialize;
 use tower::Service;
 

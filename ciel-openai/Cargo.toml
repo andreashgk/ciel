@@ -1,19 +1,19 @@
 [package]
-name = "reverie-openai"
+name = "ciel-openai"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 async-stream.workspace = true
 async-trait.workspace = true
+ciel-core.workspace = true
+ciel-util.workspace = true
 eventsource-stream.workspace = true
 futures-util.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
 hyper-rustls.workspace = true
 hyper-util.workspace = true
-reverie-core.workspace = true
-reverie-util.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true

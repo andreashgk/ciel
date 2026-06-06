@@ -135,6 +135,118 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
+name = "ciel"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "ciel-adapter",
+ "ciel-core",
+ "ciel-discord",
+ "ciel-openai",
+ "ciel-util",
+ "fjall",
+ "futures-core",
+ "futures-util",
+ "nu-ansi-term",
+ "rootcause",
+ "rootcause-tracing",
+ "serde",
+ "serde_json",
+ "time",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "ciel-adapter"
+version = "0.1.0"
+dependencies = [
+ "actson",
+ "async-stream",
+ "ciel-core",
+ "futures-core",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "time",
+ "tokio",
+ "tower",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ciel-core"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "fjall",
+ "futures-core",
+ "futures-util",
+ "rootcause",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "time",
+ "tokio",
+ "toml",
+ "tower",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ciel-discord"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "ciel-core",
+ "ciel-util",
+ "futures-util",
+ "rootcause",
+ "serde",
+ "time",
+ "tokio",
+ "tower",
+ "tracing",
+ "twilight-gateway",
+ "twilight-http",
+ "twilight-model",
+]
+
+[[package]]
+name = "ciel-openai"
+version = "0.1.0"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "ciel-core",
+ "ciel-util",
+ "eventsource-stream",
+ "futures-util",
+ "http-body-util",
+ "hyper",
+ "hyper-rustls",
+ "hyper-util",
+ "serde",
+ "serde_json",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ciel-util"
+version = "0.1.0"
+dependencies = [
+ "dashmap",
+ "serde",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "compare"
 version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -807,118 +919,6 @@ name = "regex-syntax"
 version = "0.8.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
-
-[[package]]
-name = "reverie"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "fjall",
- "futures-core",
- "futures-util",
- "nu-ansi-term",
- "reverie-adapter",
- "reverie-core",
- "reverie-discord",
- "reverie-openai",
- "reverie-util",
- "rootcause",
- "rootcause-tracing",
- "serde",
- "serde_json",
- "time",
- "tokio",
- "tower",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "reverie-adapter"
-version = "0.1.0"
-dependencies = [
- "actson",
- "async-stream",
- "futures-core",
- "futures-util",
- "reverie-core",
- "serde",
- "serde_json",
- "time",
- "tokio",
- "tower",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "reverie-core"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "fjall",
- "futures-core",
- "futures-util",
- "rootcause",
- "serde",
- "serde_json",
- "thiserror",
- "time",
- "tokio",
- "toml",
- "tower",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "reverie-discord"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "futures-util",
- "reverie-core",
- "reverie-util",
- "rootcause",
- "serde",
- "time",
- "tokio",
- "tower",
- "tracing",
- "twilight-gateway",
- "twilight-http",
- "twilight-model",
-]
-
-[[package]]
-name = "reverie-openai"
-version = "0.1.0"
-dependencies = [
- "async-stream",
- "async-trait",
- "eventsource-stream",
- "futures-util",
- "http-body-util",
- "hyper",
- "hyper-rustls",
- "hyper-util",
- "reverie-core",
- "reverie-util",
- "serde",
- "serde_json",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "reverie-util"
-version = "0.1.0"
-dependencies = [
- "dashmap",
- "serde",
- "tokio",
- "tracing",
-]
 
 [[package]]
 name = "ring"

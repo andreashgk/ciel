@@ -1,20 +1,18 @@
 [package]
-name = "reverie-core"
+name = "ciel-adapter"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-async-trait.workspace = true
-fjall.workspace = true
+actson.workspace = true
+async-stream.workspace = true
+ciel-core.workspace = true
 futures-core.workspace = true
 futures-util.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-rootcause.workspace = true
-thiserror.workspace = true
 time.workspace = true
 tokio.workspace = true
-toml.workspace = true
 tower.workspace = true
 tracing.workspace = true
 uuid.workspace = true
