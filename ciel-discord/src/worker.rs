@@ -86,6 +86,14 @@ pub async fn channel_worker(
                 .and_then(|m| m.nick.clone())
                 .or(message_create.author.global_name.as_ref().cloned());
 
+            // Resolve mentions of the format `<@id>` to `@username` to allow the bot to see who is
+            // being pinged.
+            let mut content = message_create.content.clone();
+            for mention in &message_create.mentions {
+                content =
+                    content.replace(&format!("<@{}>", mention.id), &format!("@{}", mention.name));
+            }
+
             let new_session_entry = BranchEntry::Message {
                 id: BranchId::new_from_time(timestamp),
                 user: Some(UserInfo {
@@ -94,7 +102,7 @@ pub async fn channel_worker(
                 }),
                 role: Role::User,
                 timestamp: timestamp.to_utc(),
-                content: message_create.content.clone(),
+                content,
             };
 
             branch.push(new_session_entry);
