@@ -291,11 +291,32 @@ pub async fn channel_worker(
 
                         let tool_message = tool_messages.remove(&state.id);
 
+                        let result = state.result;
+                        let mut split_char = result
+                            .char_indices()
+                            .rev()
+                            .skip(2000)
+                            .skip_while(|(_, c)| *c != '\n');
+                        let result = if let Some((split_index, char)) = split_char.next() {
+                            // Add the char's len to make sure to get the content *after* this
+                            // character.
+                            let (truncated, remaining) =
+                                result.split_at(split_index + char.len_utf8());
+                            let truncated_lines = truncated.lines().count();
+
+                            format!(
+                                "... {} previous line(s) ...\n{}",
+                                truncated_lines, remaining
+                            )
+                        } else {
+                            result
+                        };
+
                         branch.push(BranchEntry::ToolResult {
                             id: BranchId::new_from_current_time(),
                             tool_call_id: state.id.clone(),
                             name: state.name.clone(),
-                            result: state.result,
+                            result,
                         });
 
                         if let Some(tool_message) = tool_message {
