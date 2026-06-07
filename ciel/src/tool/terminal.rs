@@ -89,6 +89,8 @@ async fn do_tool(
         .as_deref()
         .unwrap_or("ControlPath=/tmp/ssh-%C");
 
+    let remote_command = format!("exec </dev/null 2>&1;\n{}", schema.command);
+
     let mut child = tokio::process::Command::new(cfg.ssh_path.as_deref().unwrap_or("ssh"))
         .arg("-o")
         // Sets up multiplexing to hosts automatically and prevents the SSH handshake from having to
@@ -101,31 +103,21 @@ async fn do_tool(
         .arg("-p")
         .arg(format!("{}", cfg.ssh_port.unwrap_or(22)))
         .arg(&cfg.ssh_host)
-        .arg(schema.command)
+        .arg(remote_command)
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::null())
         .spawn()
         .context("failed to spawn command")?;
     let stdout = child.stdout.take().context("failed to open stdout")?;
-    let stderr = child.stderr.take().context("failed to open stderr")?;
 
-    let tx_stdout = output.clone();
     tokio::spawn(async move {
         let mut reader = BufReader::new(stdout).lines();
         while let Ok(Some(line)) = reader.next_line().await {
-            let _ = tx_stdout.send(line).await;
+            let _ = output.send(line).await;
         }
     });
 
-    let tx_stderr = output.clone();
-    tokio::spawn(async move {
-        let mut reader = BufReader::new(stderr).lines();
-        while let Ok(Some(line)) = reader.next_line().await {
-            let _ = tx_stderr.send(line).await;
-        }
-    });
-
-    drop(output);
     let _status = child.wait().await;
     Ok(())
 }
