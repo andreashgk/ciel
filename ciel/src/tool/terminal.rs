@@ -1,5 +1,6 @@
 use std::process::Stdio;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use ciel_core::config::Config;
@@ -29,6 +30,8 @@ struct TerminalConfig {
     ssh_path: Option<String>,
     /// Specifies the [OpenSSH Control Path](https://man.openbsd.org/ssh_config#ControlPath).
     ssh_control_path: Option<String>,
+    default_timeout_seconds: Option<u32>,
+    max_timeout_seconds: Option<u32>,
 }
 
 impl TerminalTool {
@@ -36,17 +39,22 @@ impl TerminalTool {
         let cfg: TerminalConfig = config.read("")?;
 
         // TODO: don't hardcode, use better way to define schemas
-        let schema = r#"{
-              "type": "object",
-              "properties": {
-                "command": {
-                  "type": "string",
-                  "description": "The terminal command to execute."
-                }
-              },
-              "required": ["command"],
-              "additionalProperties": false
-            }"#;
+        let schema = &r#"{
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "description": "The terminal command to execute."
+            },
+            "timeout_seconds": {
+              "type": ["integer", "null"],
+              "description": "The maximum execution time for the command, in seconds. Pass null for default timeout.",
+              "minimum": 1
+            }
+          },
+          "required": ["command", "timeout_seconds"],
+          "additionalProperties": false
+        }"#;
         Ok(Self {
             info: Arc::new(ToolInfo {
                 name: "terminal".to_string(),
@@ -84,6 +92,12 @@ async fn do_tool(
     let schema: Schema = serde_json::from_str(args).context("failed to parse arguments")?;
     debug!(command = %schema.command, "terminal tool is being called");
 
+    let timeout = schema
+        .timeout_seconds
+        .or(cfg.default_timeout_seconds)
+        .unwrap_or(10)
+        .min(cfg.max_timeout_seconds.unwrap_or(60));
+
     let control_path = cfg
         .ssh_control_path
         .as_deref()
@@ -111,18 +125,43 @@ async fn do_tool(
         .context("failed to spawn command")?;
     let stdout = child.stdout.take().context("failed to open stdout")?;
 
+    let tx_stderr = output.clone();
     tokio::spawn(async move {
         let mut reader = BufReader::new(stdout).lines();
         while let Ok(Some(line)) = reader.next_line().await {
-            let _ = output.send(line).await;
+            let _ = tx_stderr.send(line).await;
         }
     });
 
-    let _status = child.wait().await;
-    Ok(())
+    let timeout_duration = Duration::from_secs(timeout as u64);
+
+    match tokio::time::timeout(timeout_duration, child.wait()).await {
+        Ok(Ok(_status)) => return Ok(()),
+        Ok(Err(e)) => {
+            output.send(format!("---\nCommand with error: {e}")).await?;
+            return Ok(());
+        }
+        Err(_) => {
+            debug!(
+                "command timed out after {} seconds, killing process",
+                timeout_duration.as_secs()
+            );
+
+            child
+                .kill()
+                .await
+                .context("failed to kill timed-out command")?;
+
+            rootcause::bail!(
+                "command timed out after {} seconds",
+                timeout_duration.as_secs()
+            );
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
 struct Schema {
     command: String,
+    timeout_seconds: Option<u32>,
 }
