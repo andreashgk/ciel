@@ -172,7 +172,7 @@ where
             if do_use_tools {
                 req.add_tool(Arc::new(ToolInfo {
                     name: "respond".to_string(),
-                    description: "Use this tool to chat with users.".to_string(),
+                    description: "Sends one or more messages to the user. Users will not see anything you say outside of this tool.".to_string(),
                     arguments: Some(schema["schema"].clone()),
                 }))
                 .set_tool_mode(ToolMode::Required);
