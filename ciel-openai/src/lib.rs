@@ -235,7 +235,7 @@ impl ProviderImpl for OpenAI {
         // need to be yielded.
         let close_all = |streams: &mut BTreeMap<_, _>| {
             let mut events = Vec::with_capacity(streams.len());
-            for (key, channel_index) in streams {
+            for (key, channel_index) in streams.iter() {
                 let ev = match key {
                     StreamKey::Message => ResponseEvent::Message(MessageEvent::Complete {
                         index: *channel_index,
@@ -246,6 +246,7 @@ impl ProviderImpl for OpenAI {
                 };
                 events.push(ev);
             }
+            streams.clear();
             events
         };
 
