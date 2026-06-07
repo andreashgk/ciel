@@ -20,6 +20,7 @@ use ciel_core::provider::response::MessageEvent;
 use ciel_core::provider::response::ResponseEvent;
 use ciel_core::provider::response::ResponseStream;
 use ciel_core::provider::response::ToolEvent;
+use ciel_core::provider::response::UsageEvent;
 use ciel_core::session::branch::BranchEntry;
 use ciel_core::session::branch::Role;
 use ciel_util::secret::Secret;
@@ -165,7 +166,7 @@ impl ProviderImpl for OpenAI {
             max_completion_tokens: None,
             stream: Some(true),
             stream_options: Some(StreamOptions {
-                include_usage: Some(false),
+                include_usage: Some(true),
             }),
             response_format: request.schema().map(|schema| ResponseFormat {
                 r#type: "json_schema",
@@ -268,16 +269,21 @@ impl ProviderImpl for OpenAI {
                     })?;
 
                 if event.choices.is_empty() {
+                    let Some(usage) = event.usage else {
+                        continue;
+                    };
+
+                    yield ResponseEvent::Usage(UsageEvent {
+                        current_total_usage: usage.total_tokens,
+                        input_tokens: Some(usage.prompt_tokens),
+                        output_tokens: Some(usage.completion_tokens),
+                        cached_tokens: usage.prompt_token_details.and_then(|u| u.cached_tokens),
+                    });
                     continue;
                 }
 
                 // TODO: refusal
-                let choice = event.choices.first().ok_or_else(|| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "no choices present",
-                    )
-                })?;
+                let choice = &event.choices[0];
 
                 if let Some(content) = &choice.delta.reasoning_content {
                     yield ResponseEvent::Reasoning(content.clone());

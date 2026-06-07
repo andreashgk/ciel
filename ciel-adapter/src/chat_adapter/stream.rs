@@ -103,10 +103,10 @@ pub fn parse_token_stream(
                         },
                     }
                 },
-                ResponseEvent::ToolResult(event) => {
-                    yield ResponseEvent::ToolResult(event);
+                other => {
+                    yield other;
                     continue;
-                },
+                }
             }
         }
 

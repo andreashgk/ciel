@@ -142,6 +142,22 @@ pub struct Usage {
     pub prompt_tokens: u32,
     pub completion_tokens: u32,
     pub total_tokens: u32,
+    pub completion_token_details: Option<CompletionTokenDetails>,
+    pub prompt_token_details: Option<PromptTokenDetails>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CompletionTokenDetails {
+    pub accepted_prediction_tokens: Option<u32>,
+    pub audio_tokens: Option<u32>,
+    pub reasoning_tokens: Option<u32>,
+    pub rejected_prediction_tokens: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PromptTokenDetails {
+    pub audio_tokens: Option<u32>,
+    pub cached_tokens: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
