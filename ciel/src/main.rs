@@ -172,7 +172,7 @@ async fn do_main(subcommand: Subcommand) -> rootcause::Result<()> {
             await_exit_signal().await?;
             info!("exiting");
 
-            // TODO: graceful gateway shutdown
+            gateways.stop_all().await;
         }
     }
 

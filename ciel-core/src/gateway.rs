@@ -21,6 +21,9 @@ use crate::session::store::SessionStore;
 #[async_trait]
 pub trait GatewayImpl {
     async fn start(&self, ctx: Context) -> rootcause::Result<()>;
+
+    /// Stops the gateway. Should not return until the shutdown process has completed.
+    async fn stop(&self);
 }
 
 pub type Gateway = Arc<dyn GatewayImpl + Send + Sync>;
@@ -87,6 +90,13 @@ impl Gateways {
             return Err(report!("all gateways failed to start"));
         }
         Ok(())
+    }
+
+    /// Stops all running gateways.
+    ///
+    /// This method will wait for all gateways to fully stop before returning.
+    pub async fn stop_all(&self) {
+        join_all(self.gateways.values().map(|g| g.stop())).await;
     }
 }
 

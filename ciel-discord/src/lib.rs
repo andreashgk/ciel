@@ -13,15 +13,20 @@ use ciel_util::queue_map::QueueMap;
 use ciel_util::secret::Secret;
 use futures_util::TryFutureExt;
 use serde::Deserialize;
+use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 use tracing::Instrument;
 use tracing::Level;
 use tracing::debug;
 use tracing::error;
+use tracing::info;
 use tracing::span;
 use tracing::warn;
+use twilight_gateway::CloseFrame;
 use twilight_gateway::Event;
 use twilight_gateway::EventTypeFlags;
 use twilight_gateway::Intents;
+use twilight_gateway::MessageSender;
 use twilight_gateway::Shard;
 use twilight_gateway::ShardId;
 use twilight_gateway::StreamExt;
@@ -36,6 +41,7 @@ pub struct Discord {
     token: Secret<String>,
     allowed_channels: HashSet<Id<ChannelMarker>>,
     strings: Arc<Strings>,
+    state: Mutex<Option<RunningState>>,
 }
 
 impl Discord {
@@ -56,6 +62,7 @@ impl Discord {
             token,
             allowed_channels,
             strings: Arc::new(strings),
+            state: Default::default(),
         }))
     }
 }
@@ -68,9 +75,20 @@ struct Strings {
     tool_complete: Option<String>,
 }
 
+#[derive(Debug)]
+struct RunningState {
+    shard_sender: MessageSender,
+    task: JoinHandle<()>,
+}
+
 #[async_trait]
 impl GatewayImpl for Discord {
     async fn start(&self, ctx: Context) -> rootcause::Result<()> {
+        let mut mu = self.state.lock().await;
+        if mu.is_some() {
+            return Ok(());
+        }
+
         let token = self.token.clone();
         let allowed_channels = self.allowed_channels.clone();
 
@@ -80,15 +98,17 @@ impl GatewayImpl for Discord {
 
         let strings = self.strings.clone();
 
-        tokio::spawn(async move {
+        let mut shard = Shard::new(
+            ShardId::ONE,
+            token.0.clone(),
+            Intents::GUILD_MESSAGES | Intents::MESSAGE_CONTENT,
+        );
+
+        let shard_sender = shard.sender();
+
+        let handle = tokio::spawn(async move {
             let sessions = ctx.sessions().clone();
             let chat = ctx.model().clone();
-
-            let mut shard = Shard::new(
-                ShardId::ONE,
-                token.0.clone(),
-                Intents::GUILD_MESSAGES | Intents::MESSAGE_CONTENT,
-            );
 
             let queue_map = QueueMap::<Id<ChannelMarker>, Event>::new();
 
@@ -102,6 +122,11 @@ impl GatewayImpl for Discord {
 
                 if let Event::GatewayClose(Some(info)) = &discord_event {
                     debug!(code = info.code, reason = %info.reason, "gateway connection closed");
+
+                    if let 1000 | 1006 | 4000 | 4001 = info.code {
+                        info!("stopped gateway task");
+                        return;
+                    }
                 }
 
                 let Event::MessageCreate(message_create) = &discord_event else {
@@ -139,6 +164,20 @@ impl GatewayImpl for Discord {
             }
         }.in_current_span());
 
+        *mu = Some(RunningState {
+            shard_sender,
+            task: handle,
+        });
+
         Ok(())
+    }
+
+    async fn stop(&self) {
+        let mut mu = self.state.lock().await;
+        if let Some(state) = mu.take() {
+            _ = state.shard_sender.close(CloseFrame::NORMAL);
+            // Wait until the task has finished.
+            _ = state.task.await;
+        }
     }
 }
