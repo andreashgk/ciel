@@ -34,12 +34,12 @@ rootcause-tracing = "0.12.1"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = { version = "1.0.150", features = ["preserve_order"] }
 thiserror = "2.0.18"
-time = { version = "0.3.47", default-features = false, features = ["formatting", "serde"] }
+time = { version = "0.3.47", default-features = false, features = ["formatting", "serde", "macros"] }
 tokio = { version = "1.52.3", features = ["macros", "rt", "rt-multi-thread", "fs", "net", "signal", "sync", "process"] }
 toml = { version = "1.1.2", default-features = false, features = ["parse", "serde", "std"] }
 tower = { version = "0.5.3", features = ["filter", "timeout", "tracing", "util"] }
 tracing = "0.1.44"
-tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "time"] }
 twilight-gateway = { version = "0.17.1", default-features = false, features = ["rustls-native-roots"] }
 twilight-http = { version = "0.17.1", default-features = false, features = ["rustls-native-roots"] }
 twilight-model = "0.17.1"

@@ -26,6 +26,7 @@ use tracing::info;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Layer;
 use tracing_subscriber::Registry;
+use tracing_subscriber::fmt::time::UtcTime;
 use tracing_subscriber::layer::SubscriberExt;
 
 use crate::cli::Cli;
@@ -38,8 +39,13 @@ pub mod tool;
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    let time_formatter = UtcTime::new(time::macros::format_description!(
+        "[hour]:[minute]:[second].[subsecond digits:3]"
+    ));
     let subscriber = Registry::default().with(RootcauseLayer).with(
         tracing_subscriber::fmt::layer()
+            .with_timer(time_formatter)
+            .with_target(false)
             .with_filter(EnvFilter::new("info,ciel=debug,fjall=warn,lsm_tree=warn")),
     );
 
