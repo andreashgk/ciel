@@ -28,10 +28,12 @@
               "description": "The actual message content to be sent."
             }
           },
-          "required": ["_reasoning", "message"]
+          "required": ["_reasoning", "message"],
+          "additionalProperties": false
         }
       }
     },
-    "required": ["_reasoning", "_should_respond", "messages"]
+    "required": ["_reasoning", "_should_respond", "messages"],
+    "additionalProperties": false
   }
 }
