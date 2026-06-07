@@ -130,6 +130,8 @@ async fn do_tool(
         let mut reader = BufReader::new(stdout).lines();
         while let Ok(Some(line)) = reader.next_line().await {
             let _ = tx_stderr.send(line).await;
+            // .lines() removes newlines.
+            let _ = tx_stderr.send("\n".to_string()).await;
         }
     });
 
