@@ -7,12 +7,10 @@ use std::sync::Arc;
 use ciel_core::provider;
 use ciel_core::provider::ProviderError;
 use ciel_core::provider::request::Request;
-use ciel_core::provider::request::ToolMode;
 use ciel_core::provider::response::ResponseEvent;
 use ciel_core::session::branch::Branch;
 use ciel_core::session::branch::BranchEntry;
 use ciel_core::session::branch::UserInfo;
-use ciel_core::tool::ToolInfo;
 use futures_core::Stream;
 use futures_core::future::BoxFuture;
 use futures_core::stream::BoxStream;
@@ -98,7 +96,6 @@ where
     fn call(&mut self, mut req: Request) -> Self::Future {
         let time_format = self.time_format.clone();
         let schema = self.schema.clone();
-        let do_use_tools = req.has_tools();
 
         // Basically the equivalent of a `try` block to build the request, so it can be wrapped into
         // a future afterwards.
@@ -160,25 +157,12 @@ where
                 .map(|(i, entry)| match (i, entry) {
                     (0, BranchEntry::System { id, message }) => BranchEntry::System {
                         id,
-                        message: wrap_system_prompt(do_use_tools, &schema_str, &message),
+                        message: wrap_system_prompt(&schema_str, &message),
                     },
                     (_, other) => other,
                 });
 
-            req.set_branch(Branch::new(history));
-
-            // Tools and structured output are mutually exclusive, so the workaround is making the
-            // LLM output its structured output as another tool.
-            if do_use_tools {
-                req.add_tool(Arc::new(ToolInfo {
-                    name: "respond".to_string(),
-                    description: "Sends one or more messages to the user. Users will not see anything you say outside of this tool.".to_string(),
-                    arguments: Some(schema["schema"].clone()),
-                }))
-                .set_tool_mode(ToolMode::Required);
-            } else {
-                req.set_schema(schema).set_tool_mode(ToolMode::None);
-            }
+            req.set_branch(Branch::new(history)).set_schema(schema);
 
             Ok(req)
         };
@@ -189,7 +173,7 @@ where
         async move {
             let response_stream = inner_future?.await?;
             // TODO: apply instrument to this stream, maybe?
-            let response_stream = parse_token_stream(do_use_tools, response_stream);
+            let response_stream = parse_token_stream(response_stream);
 
             Ok(response_stream.boxed())
         }
@@ -205,12 +189,7 @@ struct UserMessage {
     content: String,
 }
 
-fn wrap_system_prompt(tools: bool, schema_str: &str, original_prompt: &str) -> String {
-    let prompt = if tools {
-        include_str!("chat_adapter/prompt_tools.md")
-    } else {
-        include_str!("chat_adapter/prompt_notools.md")
-    };
-    let prompt = prompt.replace("$SCHEMA", schema_str);
+fn wrap_system_prompt(schema_str: &str, original_prompt: &str) -> String {
+    let prompt = include_str!("chat_adapter/prompt.md").replace("$SCHEMA", schema_str);
     format!("{original_prompt}\n{prompt}")
 }

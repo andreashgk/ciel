@@ -8,14 +8,12 @@ use async_stream::try_stream;
 use ciel_core::provider::response::ChannelIndex;
 use ciel_core::provider::response::MessageEvent;
 use ciel_core::provider::response::ResponseEvent;
-use ciel_core::provider::response::ToolEvent;
 use futures_core::Stream;
 use futures_util::TryStreamExt;
 use tokio::pin;
 use uuid::Uuid;
 
 pub fn parse_token_stream(
-    tools: bool,
     stream: impl Stream<Item = io::Result<ResponseEvent>>,
 ) -> impl Stream<Item = io::Result<ResponseEvent>> {
     try_stream! {
@@ -29,10 +27,6 @@ pub fn parse_token_stream(
                     yield ResponseEvent::Reasoning(reasoning);
                 },
                 ResponseEvent::Message(event) => {
-                    if tools {
-                        continue;
-                    }
-
                     match event {
                         MessageEvent::Start { index } => {
                             response_states.insert(index, ResponseParser::default());
@@ -51,49 +45,6 @@ pub fn parse_token_stream(
                             let state = response_states
                                 .get_mut(&index)
                                 .ok_or_else(|| io::Error::other("unknown channel"))?;
-
-                            state.done()?;
-                            while let Some(next) = state.next()? {
-                                yield next;
-                            }
-                            response_states.remove(&index);
-                        },
-                    }
-                },
-                ResponseEvent::Tool(event) => {
-                    if !tools {
-                        continue;
-                    }
-
-                    match event {
-                        ToolEvent::Start { index, name, tool_call_id, handled } => {
-                            if name != "respond" {
-                                yield ResponseEvent::Tool(ToolEvent::Start {
-                                    index,
-                                    tool_call_id,
-                                    name,
-                                    handled,
-                                });
-                                continue;
-                            }
-                            response_states.insert(index, ResponseParser::default());
-                        },
-                        ToolEvent::Chunk { index, delta } => {
-                            let Some(state) = response_states.get_mut(&index) else {
-                                yield ResponseEvent::Tool(ToolEvent::Chunk { index, delta });
-                                continue;
-                            };
-
-                            state.push(&delta);
-                            while let Some(next) = state.next()? {
-                                yield next;
-                            }
-                        },
-                        ToolEvent::Complete { index } => {
-                            let Some(state) = response_states.get_mut(&index) else {
-                                yield ResponseEvent::Tool(ToolEvent::Complete { index });
-                                continue;
-                            };
 
                             state.done()?;
                             while let Some(next) = state.next()? {
