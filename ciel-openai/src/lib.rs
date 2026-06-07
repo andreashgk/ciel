@@ -287,8 +287,15 @@ impl ProviderImpl for OpenAI {
                 let choice = &event.choices[0];
 
                 if let Some(content) = &choice.delta.reasoning_content {
+                    if content.is_empty() {
+                        continue;
+                    }
                     yield ResponseEvent::Reasoning(content.clone());
-                } else if let Some(reasoning) = &choice.delta.content {
+                } else if let Some(content) = &choice.delta.content {
+                    if content.is_empty() {
+                        continue;
+                    }
+
                     let index = match open_channels.get(&StreamKey::Message) {
                         Some(v) => *v,
                         None => {
@@ -306,7 +313,7 @@ impl ProviderImpl for OpenAI {
 
                     yield ResponseEvent::Message(MessageEvent::Chunk {
                         index,
-                        delta: reasoning.clone(),
+                        delta: content.clone(),
                     });
                 } else if let Some(tool) = &choice.delta.tool_calls {
                     match &tool[0] {
