@@ -19,7 +19,7 @@ pub fn parse_token_stream(
     stream: impl Stream<Item = io::Result<ResponseEvent>>,
 ) -> impl Stream<Item = io::Result<ResponseEvent>> {
     try_stream! {
-        // Maps old(!!) channel index to a response parser state.
+        // Maps channel index to a response parser state.
         let mut response_states = HashMap::<ChannelIndex, ResponseParser>::new();
 
         pin!(stream);
