@@ -90,7 +90,7 @@ async fn do_tool(
     output: mpsc::Sender<String>,
 ) -> rootcause::Result<()> {
     let schema: Schema = serde_json::from_str(args).context("failed to parse arguments")?;
-    debug!(command = %schema.command, "terminal tool is being called");
+    debug!(command = %schema.command, "running command");
 
     let timeout = schema
         .timeout_seconds

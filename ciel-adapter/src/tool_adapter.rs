@@ -19,7 +19,9 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tower::Layer;
 use tower::Service;
+use tracing::Instrument;
 use tracing::Level;
+use tracing::Span;
 use tracing::span;
 use uuid::Uuid;
 
@@ -167,8 +169,15 @@ fn wrap_stream(
                     let (res_tx, res_rx) = mpsc::channel(128);
 
                     let tool = tool.clone();
+
+                    let span = tracing::debug_span!(
+                        parent: &Span::current(),
+                        "tool",
+                        %name,
+                        id = tool_call_id,
+                    );
                     let handle = tokio::spawn(async move {
-                        tool.call(args_rx, res_tx).await
+                        tool.call(args_rx, res_tx).instrument(span).await
                     });
 
                     let state = ToolState {
