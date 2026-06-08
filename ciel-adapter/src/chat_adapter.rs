@@ -100,8 +100,6 @@ where
         // Basically the equivalent of a `try` block to build the request, so it can be wrapped into
         // a future afterwards.
         let build_request = move || {
-            let schema_str = serde_json::to_string(schema.as_ref()).map_err(io::Error::other)?;
-
             // TODO: it's very possible this is horribly inefficient right now
             let history = req
                 .branch()
@@ -157,7 +155,7 @@ where
                 .map(|(i, entry)| match (i, entry) {
                     (0, BranchEntry::System { id, message }) => BranchEntry::System {
                         id,
-                        message: wrap_system_prompt(&schema_str, &message),
+                        message: wrap_system_prompt(&message),
                     },
                     (_, other) => other,
                 });
@@ -189,7 +187,7 @@ struct UserMessage {
     content: String,
 }
 
-fn wrap_system_prompt(schema_str: &str, original_prompt: &str) -> String {
-    let prompt = include_str!("chat_adapter/prompt.md").replace("$SCHEMA", schema_str);
+fn wrap_system_prompt(original_prompt: &str) -> String {
+    let prompt = include_str!("chat_adapter/prompt.md");
     format!("{original_prompt}\n{prompt}")
 }
