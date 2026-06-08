@@ -12,6 +12,7 @@ use ciel_core::provider::request::Request;
 use ciel_core::provider::response::ResponseStream;
 use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
+use rootcause::Report;
 use serde::Deserialize;
 use tower::Service;
 
@@ -27,20 +28,25 @@ impl Providers {
     }
 
     pub async fn apply_config(&mut self, config: Config) -> provider::Result<()> {
-        let entries: BTreeMap<String, ProviderConfig> = config.read("")?;
+        let entries: BTreeMap<String, ProviderConfig> =
+            config.read("").map_err(ProviderError::Config)?;
 
         let mut map = HashMap::with_capacity(entries.len());
 
         for (name, c) in entries {
             let provider_type = &c.r#type;
-            let provider_fn = self.types.get(provider_type).ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("unknown provider type: {provider_type}"),
-                )
-            })?;
+            let provider_fn = self
+                .types
+                .get(provider_type)
+                .ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("unknown provider type: {provider_type}"),
+                    )
+                })
+                .map_err(ProviderError::IO)?;
 
-            let provider = provider_fn(config.scoped(&name))?;
+            let provider = provider_fn(config.scoped(&name)).map_err(ProviderError::Config)?;
             map.insert(name.to_string(), provider);
         }
 
@@ -56,7 +62,7 @@ impl Providers {
 
 impl Service<Request> for Providers {
     type Response = ResponseStream;
-    type Error = ProviderError;
+    type Error = Report<ProviderError>;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(
@@ -81,7 +87,8 @@ async fn handle(provider: Option<Provider>, req: Request) -> provider::Result<Re
                 "no such provider: {}",
                 req.provider().unwrap_or("(none specified)")
             ),
-        )));
+        ))
+        .into());
     };
 
     provider.chat(req).await

@@ -34,8 +34,9 @@ use hyper_rustls::HttpsConnector;
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
+use rootcause::IntoReport;
+use rootcause::Report;
 use serde::Deserialize;
-use tracing::error;
 use uuid::Uuid;
 
 use crate::models::Error;
@@ -90,7 +91,8 @@ impl ProviderImpl for OpenAI {
         let url = url
             .parse::<hyper::Uri>()
             .map_err(|err| format!("invalid base url: {err}"))
-            .map_err(ConfigError::Other)?;
+            .map_err(ConfigError::Other)
+            .map_err(ProviderError::Config)?;
 
         // TODO: assistant messages and tool calls should maybe be merged?
         let messages = request
@@ -185,10 +187,9 @@ impl ProviderImpl for OpenAI {
         let body = match serde_json::to_string(&req) {
             Ok(v) => v,
             Err(error) => {
-                return Err(ProviderError::IO(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    error,
-                )));
+                return Err(
+                    ProviderError::IO(io::Error::new(io::ErrorKind::InvalidInput, error)).into(),
+                );
             }
         };
 
@@ -200,17 +201,16 @@ impl ProviderImpl for OpenAI {
         let req = match req {
             Ok(v) => v,
             Err(err) => {
-                return Err(ProviderError::IO(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    err,
-                )));
+                return Err(
+                    ProviderError::IO(io::Error::new(io::ErrorKind::InvalidInput, err)).into(),
+                );
             }
         };
         let res = self.client.request(req).await;
         let res = match res {
             Ok(v) => v,
             Err(err) => {
-                return Err(ProviderError::IO(io::Error::other(err)));
+                return Err(ProviderError::IO(io::Error::other(err)).into());
             }
         };
 
@@ -399,7 +399,7 @@ impl Display for OpenAI {
 
 /// Tries to determine the equivalent [ProviderError] of the request assumes there is an error. If
 /// it cannot find a specific error, a generic error will be returned.
-async fn determine_error(response: Response<Incoming>, model: &str) -> ProviderError {
+async fn determine_error(response: Response<Incoming>, model: &str) -> Report<ProviderError> {
     let status_code = response.status().as_u16();
     let body = response
         .into_body()
@@ -407,18 +407,16 @@ async fn determine_error(response: Response<Incoming>, model: &str) -> ProviderE
         .await
         .map(|body| {
             let b = &body.to_bytes();
-            serde_json::from_slice(b).inspect_err(|why| {
-                error!(%why, "failed to parse error");
-            })
+            serde_json::from_slice(b)
+                .map_err(|why| format!("failed to parse provider error: {why}\n(this indicates the provider did not return an openai-compatible error)"))
         })
-        .inspect_err(|why| {
-            error!(%why, "failed to read response body");
-        });
+        .map_err(|why| format!("failed to read error: {why}"))
+        .flatten();
 
     let body: Error = match body {
-        Ok(Ok(v)) => v,
+        Ok(v) => v,
         // Try to determine the error from the status code if the body could not be resolved.
-        _ => {
+        Err(err) => {
             return match status_code {
                 400 => {
                     ProviderError::IO(io::Error::new(io::ErrorKind::InvalidInput, "bad request"))
@@ -426,8 +424,12 @@ async fn determine_error(response: Response<Incoming>, model: &str) -> ProviderE
                 401 => ProviderError::Unauthorized,
                 404 => ProviderError::ModelNotFound(model.to_string()),
                 429 => ProviderError::RateLimitExceeded,
-                _ => ProviderError::IO(io::Error::other("failed with unknown error")),
-            };
+                other => ProviderError::IO(io::Error::other(format!(
+                    "failed with unknown error (http code {other})"
+                ))),
+            }
+            .into_report()
+            .attach(err);
         }
     };
 
@@ -439,7 +441,7 @@ async fn determine_error(response: Response<Incoming>, model: &str) -> ProviderE
         "insufficient_quota" => ProviderError::QuotaExceeded,
         _ => {
             if status_code == 401 {
-                return ProviderError::Unauthorized;
+                return ProviderError::Unauthorized.into();
             }
             ProviderError::IO(io::Error::other(format!(
                 "failed with unknown error: {}",
@@ -447,4 +449,6 @@ async fn determine_error(response: Response<Incoming>, model: &str) -> ProviderE
             )))
         }
     }
+    .into_report()
+    .attach(body.error.message)
 }

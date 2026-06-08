@@ -17,6 +17,7 @@ use ciel_core::session::branch::UserInfo;
 use ciel_core::session::store::SessionStore;
 use ciel_util::queue_map::QueueMapReceiver;
 use futures_util::TryStreamExt;
+use rootcause::Report;
 use rootcause::option_ext::OptionExt;
 use time::OffsetDateTime;
 use tokio::time::Instant;
@@ -37,7 +38,7 @@ use crate::Strings;
 pub async fn channel_worker(
     mut receiver: QueueMapReceiver<Id<ChannelMarker>, Event>,
     sessions: SessionStore,
-    mut chat: impl Service<Request, Response = ResponseStream, Error = ProviderError>,
+    mut chat: impl Service<Request, Response = ResponseStream, Error = Report<ProviderError>>,
     system_prompt: String,
     http: Arc<Client>,
     strings: Arc<Strings>,

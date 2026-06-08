@@ -1,3 +1,4 @@
+use rootcause::Report;
 use tower::util::BoxCloneService;
 
 use crate::provider::ProviderError;
@@ -12,7 +13,7 @@ pub struct Context {
     system_prompt: String,
 }
 
-pub type ModelService = BoxCloneService<Request, ResponseStream, ProviderError>;
+pub type ModelService = BoxCloneService<Request, ResponseStream, Report<ProviderError>>;
 
 impl Context {
     pub fn new(sessions: SessionStore, provider: ModelService, system_prompt: String) -> Self {

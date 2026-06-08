@@ -18,6 +18,7 @@ use ciel_core::session::store::SessionStore;
 use futures_util::TryStreamExt;
 use nu_ansi_term::Color;
 use nu_ansi_term::Style;
+use rootcause::Report;
 use rootcause::option_ext::OptionExt;
 use rootcause::prelude::ResultExt;
 use time::OffsetDateTime;
@@ -29,7 +30,7 @@ use tracing::warn;
 
 pub struct Cli {
     pub sessions: SessionStore,
-    pub service: BoxService<Request, ResponseStream, ProviderError>,
+    pub service: BoxService<Request, ResponseStream, Report<ProviderError>>,
     pub system_prompt: String,
 }
 

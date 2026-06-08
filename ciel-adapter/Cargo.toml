@@ -9,6 +9,7 @@ async-stream.workspace = true
 ciel-core.workspace = true
 futures-core.workspace = true
 futures-util.workspace = true
+rootcause.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 time.workspace = true

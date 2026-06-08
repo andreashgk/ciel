@@ -1,13 +1,11 @@
 use std::env;
 use std::panic;
 use std::process::ExitCode;
-use std::time::Duration;
 
 use ciel_adapter::chat_adapter::ChatAdapterLayer;
 use ciel_adapter::tool_adapter::ToolAdapterLayer;
 use ciel_core::config::Config;
 use ciel_core::gateway::Gateways;
-use ciel_core::provider::ProviderError;
 use ciel_core::provider::request::Request;
 use ciel_core::session::store::SessionStore;
 use ciel_core::tool::Tool;
@@ -16,11 +14,8 @@ use ciel_util::panic_hook;
 use fjall::SingleWriterTxDatabase;
 use rootcause::prelude::ResultExt;
 use rootcause_tracing::RootcauseLayer;
-use tokio::io;
-use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tower::timeout::error::Elapsed;
 use tracing::error;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
@@ -132,18 +127,6 @@ async fn do_main(subcommand: Subcommand) -> rootcause::Result<()> {
             req.set_provider(provider.clone()).set_model(model.clone());
             req
         })
-        // Cast the error produced by the timeout layer back to a ProviderError.
-        .map_err(|err: BoxError| match err.downcast::<ProviderError>() {
-            Ok(err) => *err,
-            Err(err) => match err.downcast::<Elapsed>() {
-                Ok(_) => ProviderError::IO(io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    "request timed out",
-                )),
-                Err(err) => ProviderError::IO(io::Error::other(err)),
-            },
-        })
-        .timeout(Duration::from_secs(10))
         .service(providers);
 
     let sessions = SessionStore::new(db.clone());

@@ -14,6 +14,7 @@ use futures_core::Stream;
 use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
 use futures_util::TryStreamExt;
+use rootcause::Report;
 use tokio::pin;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -63,7 +64,7 @@ impl<S> Default for ToolAdapterLayer<S> {
 
 impl<S, ResponseStream> Layer<S> for ToolAdapterLayer<S>
 where
-    S: Service<Request, Response = ResponseStream, Error = ProviderError>,
+    S: Service<Request, Response = ResponseStream, Error = Report<ProviderError>>,
     ResponseStream: Stream<Item = io::Result<ResponseEvent>>,
 {
     type Service = ToolAdapterService<S>;
@@ -84,12 +85,12 @@ pub struct ToolAdapterService<S> {
 
 impl<S, TokenStream> Service<Request> for ToolAdapterService<S>
 where
-    S: Service<Request, Response = TokenStream, Error = ProviderError>,
+    S: Service<Request, Response = TokenStream, Error = Report<ProviderError>>,
     S::Future: Send + 'static,
     TokenStream: Stream<Item = io::Result<ResponseEvent>> + Send + 'static,
 {
     type Response = ResponseStream;
-    type Error = ProviderError;
+    type Error = Report<ProviderError>;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(

@@ -37,7 +37,7 @@ impl Provider {
     }
 }
 
-pub type Result<V> = std::result::Result<V, ProviderError>;
+pub type Result<V> = rootcause::Result<V, ProviderError>;
 
 #[derive(Debug, Error)]
 pub enum ProviderError {

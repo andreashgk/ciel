@@ -16,6 +16,7 @@ use futures_core::future::BoxFuture;
 use futures_core::stream::BoxStream;
 use futures_util::FutureExt;
 use futures_util::StreamExt;
+use rootcause::Report;
 use serde::Serialize;
 use time::format_description::parse_owned;
 use tower::Layer;
@@ -54,7 +55,7 @@ pub type ChatStream = BoxStream<'static, io::Result<ResponseEvent>>;
 
 impl<S, TokenStream> Layer<S> for ChatAdapterLayer<S>
 where
-    S: Service<Request, Response = TokenStream, Error = ProviderError>,
+    S: Service<Request, Response = TokenStream, Error = Report<ProviderError>>,
     TokenStream: Stream<Item = io::Result<ResponseEvent>>,
 {
     type Service = ChatAdapterService<S>;
@@ -78,12 +79,12 @@ pub struct ChatAdapterService<S> {
 
 impl<S, TokenStream> Service<Request> for ChatAdapterService<S>
 where
-    S: Service<Request, Response = TokenStream, Error = ProviderError>,
+    S: Service<Request, Response = TokenStream, Error = Report<ProviderError>>,
     S::Future: Send + 'static,
     TokenStream: Stream<Item = io::Result<ResponseEvent>> + Send + 'static,
 {
     type Response = ChatStream;
-    type Error = ProviderError;
+    type Error = Report<ProviderError>;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(
