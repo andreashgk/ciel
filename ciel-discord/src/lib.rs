@@ -11,9 +11,13 @@ use ciel_core::gateway::Gateway;
 use ciel_core::gateway::GatewayImpl;
 use ciel_util::queue_map::QueueMap;
 use ciel_util::secret::Secret;
+use futures_util::FutureExt;
+use futures_util::StreamExt;
 use futures_util::TryFutureExt;
 use serde::Deserialize;
+use tokio::select;
 use tokio::sync::Mutex;
+use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tracing::Instrument;
 use tracing::Level;
@@ -26,10 +30,10 @@ use twilight_gateway::CloseFrame;
 use twilight_gateway::Event;
 use twilight_gateway::EventTypeFlags;
 use twilight_gateway::Intents;
-use twilight_gateway::MessageSender;
+use twilight_gateway::Message;
 use twilight_gateway::Shard;
 use twilight_gateway::ShardId;
-use twilight_gateway::StreamExt;
+use twilight_gateway::StreamExt as _;
 use twilight_http::Client;
 use twilight_model::id::Id;
 use twilight_model::id::marker::ChannelMarker;
@@ -77,7 +81,7 @@ struct Strings {
 
 #[derive(Debug)]
 struct RunningState {
-    shard_sender: MessageSender,
+    close_sender: oneshot::Sender<()>,
     task: JoinHandle<()>,
 }
 
@@ -104,7 +108,8 @@ impl GatewayImpl for Discord {
             Intents::GUILD_MESSAGES | Intents::MESSAGE_CONTENT,
         );
 
-        let shard_sender = shard.sender();
+        let (close_sender, close_receiver) = oneshot::channel();
+        let close_receiver = close_receiver.shared();
 
         let handle = tokio::spawn(async move {
             let sessions = ctx.sessions().clone();
@@ -113,7 +118,19 @@ impl GatewayImpl for Discord {
             let queue_map = QueueMap::<Id<ChannelMarker>, Event>::new();
 
             debug!("listening for events");
-            while let Some(item) = shard.next_event(EventTypeFlags::MESSAGE_CREATE).await {
+            loop {
+                let item = select! {
+                    item = shard.next_event(EventTypeFlags::MESSAGE_CREATE) => match item {
+                        Some(item) => item,
+                        None => {
+                            break;
+                        },
+                    },
+                    _ = close_receiver.clone() => {
+                        break;
+                    },
+                };
+
                 let Ok(discord_event) = item else {
                     tracing::warn!(source = ?item.unwrap_err(), "error receiving event");
 
@@ -122,11 +139,6 @@ impl GatewayImpl for Discord {
 
                 if let Event::GatewayClose(Some(info)) = &discord_event {
                     debug!(code = info.code, reason = %info.reason, "gateway connection closed");
-
-                    if let 1000 | 1006 | 4000 | 4001 = info.code {
-                        info!("stopped gateway task");
-                        return;
-                    }
                 }
 
                 let Event::MessageCreate(message_create) = &discord_event else {
@@ -160,12 +172,21 @@ impl GatewayImpl for Discord {
                     .instrument(span)
                     .in_current_span()
                 );
-
             }
+
+            debug!("stopping gateway task");
+            shard.close(CloseFrame::NORMAL);
+            // Drain the shard receiver in order for discord to get the close event.
+            while let Some(ev) = shard.next().await {
+                if let Ok(Message::Close(_)) = ev {
+                    break;
+                }
+            }
+            info!("stopped gateway task");
         }.in_current_span());
 
         *mu = Some(RunningState {
-            shard_sender,
+            close_sender,
             task: handle,
         });
 
@@ -175,7 +196,7 @@ impl GatewayImpl for Discord {
     async fn stop(&self) {
         let mut mu = self.state.lock().await;
         if let Some(state) = mu.take() {
-            _ = state.shard_sender.close(CloseFrame::NORMAL);
+            _ = state.close_sender.send(());
             // Wait until the task has finished.
             _ = state.task.await;
         }
