@@ -37,9 +37,12 @@ use hyper_util::rt::TokioExecutor;
 use rootcause::IntoReport;
 use rootcause::Report;
 use serde::Deserialize;
+use serde_json::Number;
+use serde_json::Value;
 use uuid::Uuid;
 
 use crate::models::Error;
+use crate::models::ErrorInfo;
 use crate::models::Event;
 use crate::models::FunctionDelta;
 use crate::models::FunctionTool;
@@ -401,23 +404,53 @@ impl Display for OpenAI {
 /// it cannot find a specific error, a generic error will be returned.
 async fn determine_error(response: Response<Incoming>, model: &str) -> Report<ProviderError> {
     let status_code = response.status().as_u16();
-    let body = response
+    let mut body = response
         .into_body()
         .collect()
         .await
         .map(|body| {
             let b = &body.to_bytes();
             serde_json::from_slice(b)
-                .map_err(|why| format!("failed to parse provider error: {why}\n(this indicates the provider did not return an openai-compatible error)"))
+                .unwrap_or_else(|why| {
+                    Error {
+                        error: ErrorInfo {
+                            message: format!("failed to parse provider error: {why}\n(this indicates the provider did not return an openai-compatible error)"),
+                            code: Some(Value::Number(Number::from(status_code))),
+                        },
+                    }
+                })
         })
-        .map_err(|why| format!("failed to read error: {why}"))
-        .flatten();
+        .unwrap_or_else(|why| {
+            Error {
+                error: ErrorInfo {
+                    message: format!("failed to read error: {why}"),
+                    code: Some(Value::Number(Number::from(status_code))),
+                },
+            }
+        });
 
-    let body: Error = match body {
-        Ok(v) => v,
-        // Try to determine the error from the status code if the body could not be resolved.
-        Err(err) => {
-            return match status_code {
+    if body.error.code.is_none() {
+        body.error.code = Some(Value::Number(Number::from(status_code)));
+    }
+
+    match body.error.code {
+        Some(Value::String(code)) => match code.as_str() {
+            "context_length_exceeded" => ProviderError::ContextExceeded,
+            "invalid_api_key" => ProviderError::Unauthorized,
+            "model_not_found" => ProviderError::ModelNotFound(model.to_string()),
+            "rate_limit_exceeded" => ProviderError::RateLimitExceeded,
+            "insufficient_quota" => ProviderError::QuotaExceeded,
+            other => {
+                if status_code == 401 {
+                    return ProviderError::Unauthorized.into();
+                }
+                ProviderError::IO(io::Error::other(format!(
+                    "failed with unknown error code: {other}",
+                )))
+            }
+        },
+        Some(Value::Number(code)) => match code.as_u64() {
+            Some(code) => match code {
                 400 => {
                     ProviderError::IO(io::Error::new(io::ErrorKind::InvalidInput, "bad request"))
                 }
@@ -425,29 +458,17 @@ async fn determine_error(response: Response<Incoming>, model: &str) -> Report<Pr
                 404 => ProviderError::ModelNotFound(model.to_string()),
                 429 => ProviderError::RateLimitExceeded,
                 other => ProviderError::IO(io::Error::other(format!(
-                    "failed with unknown error (http code {other})"
+                    "failed with unknown error code: {other}"
                 ))),
-            }
-            .into_report()
-            .attach(err);
-        }
-    };
-
-    match body.error.code.as_str() {
-        "context_length_exceeded" => ProviderError::ContextExceeded,
-        "invalid_api_key" => ProviderError::Unauthorized,
-        "model_not_found" => ProviderError::ModelNotFound(model.to_string()),
-        "rate_limit_exceeded" => ProviderError::RateLimitExceeded,
-        "insufficient_quota" => ProviderError::QuotaExceeded,
-        _ => {
-            if status_code == 401 {
-                return ProviderError::Unauthorized.into();
-            }
-            ProviderError::IO(io::Error::other(format!(
-                "failed with unknown error: {}",
-                body.error.message
-            )))
-        }
+            },
+            None => ProviderError::IO(io::Error::other(format!(
+                "failed with unknown error code: {code}"
+            ))),
+        },
+        Some(other) => ProviderError::IO(io::Error::other(format!(
+            "failed with unknown error code: {other}"
+        ))),
+        None => ProviderError::IO(io::Error::other(format!("failed with unknown error code"))),
     }
     .into_report()
     .attach(body.error.message)

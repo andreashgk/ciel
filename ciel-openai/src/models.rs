@@ -169,5 +169,6 @@ pub struct Error {
 pub struct ErrorInfo {
     #[serde(default)]
     pub message: String,
-    pub code: String,
+    /// Providers just return whatever they want here.
+    pub code: Option<Value>,
 }
