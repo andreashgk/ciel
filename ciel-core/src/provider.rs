@@ -1,6 +1,5 @@
 pub mod request;
 pub mod response;
-pub mod tool;
 
 use std::fmt::Debug;
 use std::fmt::Display;
