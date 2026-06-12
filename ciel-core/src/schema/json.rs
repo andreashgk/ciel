@@ -65,6 +65,9 @@ impl SchemaKind {
                 map.insert("type".to_string(), Value::String("array".to_string()));
                 rules.add_json_fields(map);
             }
+            SchemaKind::Const(value) => {
+                map.insert("const".to_string(), value.clone());
+            }
             SchemaKind::Union(variants) => {
                 for v in variants {
                     let mut variant_map = Map::new();

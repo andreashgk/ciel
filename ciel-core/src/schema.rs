@@ -1,6 +1,7 @@
 pub mod json;
 
 use indexmap::IndexMap;
+use serde_json::Value;
 
 /// Represents a subset of [JSON Schema](https://json-schema.org/).
 #[derive(Debug, Clone, PartialEq)]
@@ -110,6 +111,13 @@ impl Schema {
             kind: SchemaKind::Any,
         }
     }
+
+    pub fn constant(value: Value) -> Self {
+        Self {
+            metadata: Default::default(),
+            kind: SchemaKind::Const(value),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -125,6 +133,7 @@ pub enum SchemaKind {
     Integer(NumberRules),
     Boolean,
     Null,
+    Const(Value),
 
     Object(Box<ObjectRules>),
     Array(Box<ArrayRules>),
