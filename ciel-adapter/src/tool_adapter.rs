@@ -103,6 +103,21 @@ where
     fn call(&mut self, mut req: Request) -> Self::Future {
         let tools = self.tools.clone();
 
+        if !self.tools.is_empty() {
+            req.system_prompt_mut().push_str(
+                "\n\
+                # Tools\n\
+                When calling a tool, you will have another turn after the tool call to either call \
+                more tools or to respond to the user. \
+                You do not have to keep the user updated about every tool call, only when you \
+                start and when you are done with your turns. \
+                When you respond without calling a tool, your turns end and you must await a \
+                response from the user before you can call a tool again. \
+                DO NOT answer without a tool call unless you are done with your task, have \
+                completed your objective and have no more tools left to call.\n",
+            );
+        }
+
         for tool in tools.values() {
             // TODO: this could become a problem when multiple tools have the same name
             req.add_tool(tool.info().clone());
