@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::fmt::Display;
@@ -46,6 +47,7 @@ use crate::models::ErrorInfo;
 use crate::models::Event;
 use crate::models::FunctionDelta;
 use crate::models::FunctionTool;
+use crate::models::JsonSchema;
 use crate::models::RequestMessage;
 use crate::models::RequestToolCall;
 use crate::models::RequestToolCallType;
@@ -157,7 +159,7 @@ impl ProviderImpl for OpenAI {
                 ToolDefinition::Function(FunctionTool {
                     name: &tool.name,
                     description: Some(&*tool.description).filter(|s| s.is_empty()),
-                    parameters: tool.arguments.as_ref(),
+                    parameters: tool.arguments.as_ref().map(|s| Cow::Owned(s.to_json())),
                     strict: tool.arguments.is_some(),
                 })
             })
@@ -173,9 +175,13 @@ impl ProviderImpl for OpenAI {
             stream_options: Some(StreamOptions {
                 include_usage: Some(true),
             }),
-            response_format: request.schema().map(|schema| ResponseFormat {
-                r#type: "json_schema",
-                json_schema: Some(schema),
+            response_format: request.schema().map(|schema| ResponseFormat::JsonSchema {
+                json_schema: JsonSchema {
+                    name: schema.metadata.title.as_deref().unwrap_or(""),
+                    description: schema.metadata.title.as_deref(),
+                    strict: Some(true),
+                    schema: Cow::Owned(schema.to_json()),
+                },
             }),
             reasoning_effort: None,
             tools: &tools,

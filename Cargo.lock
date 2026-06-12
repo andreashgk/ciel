@@ -186,6 +186,7 @@ dependencies = [
  "fjall",
  "futures-core",
  "futures-util",
+ "indexmap",
  "rootcause",
  "serde",
  "serde_json",

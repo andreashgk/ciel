@@ -1,5 +1,8 @@
 #![allow(unused)]
 
+use std::borrow::Cow;
+
+use ciel_core::schema::Schema;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
@@ -66,10 +69,21 @@ pub struct StreamOptions {
 }
 
 #[derive(Debug, Serialize)]
-pub struct ResponseFormat<'a> {
-    pub r#type: &'a str,
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ResponseFormat<'a> {
+    Text,
+    JsonObject,
+    JsonSchema { json_schema: JsonSchema<'a> },
+}
+
+#[derive(Debug, Serialize)]
+pub struct JsonSchema<'a> {
+    pub name: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub json_schema: Option<&'a Value>,
+    pub description: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strict: Option<bool>,
+    pub schema: Cow<'a, Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -84,7 +98,7 @@ pub struct FunctionTool<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub parameters: Option<&'a Value>,
+    pub parameters: Option<Cow<'a, Value>>,
     pub strict: bool,
 }
 

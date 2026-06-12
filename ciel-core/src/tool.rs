@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde_json::Value;
 use tokio::sync::mpsc;
+
+use crate::schema::Schema;
 
 #[derive(Clone)]
 pub struct Tool {
@@ -52,6 +53,6 @@ pub struct ToolInfo {
     /// Provides more context to the LLM about the tool. Can be left empty to provide no
     /// description.
     pub description: String,
-    // TODO: make actual schema type
-    pub arguments: Option<Value>,
+    /// The schema the arguments should follow.
+    pub arguments: Option<Schema>,
 }

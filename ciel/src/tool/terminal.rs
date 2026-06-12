@@ -5,6 +5,11 @@ use std::time::Duration;
 use async_trait::async_trait;
 use ciel_core::config::Config;
 use ciel_core::config::ConfigError;
+use ciel_core::schema::NumberRules;
+use ciel_core::schema::ObjectRules;
+use ciel_core::schema::Schema;
+use ciel_core::schema::SchemaKind;
+use ciel_core::schema::StringRules;
 use ciel_core::tool::ToolImpl;
 use ciel_core::tool::ToolInfo;
 use rootcause::option_ext::OptionExt;
@@ -38,28 +43,35 @@ impl TerminalTool {
     pub fn new(config: Config) -> Result<Self, ConfigError> {
         let cfg: TerminalConfig = config.read("")?;
 
-        // TODO: don't hardcode, use better way to define schemas
-        let schema = &r#"{
-          "type": "object",
-          "properties": {
-            "command": {
-              "type": "string",
-              "description": "The terminal command to execute."
-            },
-            "timeout_seconds": {
-              "type": ["integer", "null"],
-              "description": "The maximum execution time for the command, in seconds. Pass null for default timeout.",
-              "minimum": 1
-            }
-          },
-          "required": ["command", "timeout_seconds"],
-          "additionalProperties": false
-        }"#;
+        let schema = Schema::object(
+            ObjectRules::new()
+                .required_property(
+                    "command",
+                    Schema::string(StringRules::new())
+                        .description("The terminal command to execute."),
+                )
+                .required_property(
+                    "timeout_seconds",
+                    Schema::union([
+                        SchemaKind::Integer(
+                            NumberRules::new()
+                                .minimum(1.)
+                                .maximum(cfg.max_timeout_seconds.unwrap_or(60) as f64),
+                        ),
+                        SchemaKind::Null,
+                    ])
+                    .description(
+                        "The maximum execution time for the command, in seconds. \
+                        Pass null for default timeout.",
+                    ),
+                )
+                .additional_properties(false),
+        );
         Ok(Self {
             info: Arc::new(ToolInfo {
                 name: "terminal".to_string(),
                 description: "Run a command in your terminal.".to_string(),
-                arguments: Some(serde_json::from_str(schema).expect("valid schema")),
+                arguments: Some(schema),
             }),
             cfg,
         })
@@ -89,7 +101,7 @@ async fn do_tool(
     cfg: &TerminalConfig,
     output: mpsc::Sender<String>,
 ) -> rootcause::Result<()> {
-    let schema: Schema = serde_json::from_str(args).context("failed to parse arguments")?;
+    let schema: ArgSchema = serde_json::from_str(args).context("failed to parse arguments")?;
     debug!(command = %schema.command, "running command");
 
     let timeout = schema
@@ -163,7 +175,7 @@ async fn do_tool(
 }
 
 #[derive(Debug, Deserialize)]
-struct Schema {
+struct ArgSchema {
     command: String,
     timeout_seconds: Option<u32>,
 }

@@ -8,6 +8,10 @@ use ciel_core::provider;
 use ciel_core::provider::ProviderError;
 use ciel_core::provider::request::Request;
 use ciel_core::provider::response::ResponseEvent;
+use ciel_core::schema::ArrayRules;
+use ciel_core::schema::ObjectRules;
+use ciel_core::schema::Schema;
+use ciel_core::schema::StringRules;
 use ciel_core::session::branch::Branch;
 use ciel_core::session::branch::BranchEntry;
 use ciel_core::session::branch::UserInfo;
@@ -31,14 +35,56 @@ use crate::chat_adapter::stream::parse_token_stream;
 #[derive(Clone)]
 pub struct ChatAdapterLayer<S> {
     pd: PhantomData<S>,
-    schema: Arc<serde_json::Value>,
+    schema: Arc<Schema>,
     time_format: Arc<time::format_description::OwnedFormatItem>,
 }
 
 impl<S> Default for ChatAdapterLayer<S> {
     fn default() -> Self {
-        let schema = include_str!("chat_adapter/schema.json");
-        let schema = serde_json::from_str(schema).expect("valid schema");
+        let schema = Schema::object(
+            ObjectRules::new()
+                .required_property(
+                    "_reasoning",
+                    Schema::string(StringRules::new()).description(
+                        "Internal thought process for why the bot \
+                        should or should not respond to the latest message(s).",
+                    ),
+                )
+                .required_property(
+                    "_should_respond",
+                    Schema::boolean().description(
+                        "Determines if the bot will send a response at all. \
+                        If false, no messages have to be specified. \
+                        This should be used when the conversation has ended, \
+                        no one is speaking to the bot, \
+                        or you feel you dont need to answer.",
+                    ),
+                )
+                .required_property(
+                    "messages",
+                    Schema::array(
+                        ArrayRules::new().items(Schema::object(
+                            ObjectRules::new()
+                                .required_property(
+                                    "_reasoning",
+                                    Schema::string(StringRules::new()).description(
+                                        "Internal thought process for formulating \
+                                        this specific message.",
+                                    ),
+                                )
+                                .required_property(
+                                    "message",
+                                    Schema::string(StringRules::new())
+                                        .description("The actual message content to be sent."),
+                                )
+                                .additional_properties(false),
+                        )),
+                    )
+                    .description("List of messages to send in the channel."),
+                )
+                .additional_properties(false),
+        )
+        .title("ChatResponse");
 
         let time_format = parse_owned::<2>("[year]-[month]-[day] [hour]:[minute]")
             .expect("valid time format at compile time");
@@ -73,7 +119,7 @@ where
 #[derive(Clone)]
 pub struct ChatAdapterService<S> {
     inner: S,
-    schema: Arc<serde_json::Value>,
+    schema: Arc<Schema>,
     time_format: Arc<time::format_description::OwnedFormatItem>,
 }
 

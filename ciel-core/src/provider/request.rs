@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
-use serde_json::Value;
-
+use crate::schema::Schema;
 use crate::session::branch::Branch;
 use crate::tool::ToolInfo;
 
@@ -10,7 +9,7 @@ pub struct Request {
     provider: Option<String>,
     model: Option<String>,
     branch: Branch,
-    schema: Option<Arc<Value>>,
+    schema: Option<Arc<Schema>>,
     tool_definitions: Vec<Arc<ToolInfo>>,
     tool_mode: ToolMode,
 }
@@ -47,11 +46,11 @@ impl Request {
         self
     }
 
-    pub fn schema(&self) -> Option<&Arc<Value>> {
+    pub fn schema(&self) -> Option<&Arc<Schema>> {
         self.schema.as_ref()
     }
 
-    pub fn set_schema(&mut self, schema: Arc<Value>) -> &mut Self {
+    pub fn set_schema(&mut self, schema: Arc<Schema>) -> &mut Self {
         self.schema = Some(schema);
         self
     }
