@@ -4,7 +4,7 @@ use crate::schema::Schema;
 use crate::session::branch::Branch;
 use crate::tool::ToolInfo;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Request {
     provider: Option<String>,
     model: Option<String>,
