@@ -3,7 +3,7 @@ use std::io;
 
 use actson::JsonEvent;
 use actson::JsonParser;
-use actson::feeder::PushJsonFeeder;
+use actson::feeder::JsonFeeder;
 use async_stream::try_stream;
 use ciel_core::provider::response::ChannelIndex;
 use ciel_core::provider::response::MessageEvent;
@@ -36,7 +36,8 @@ pub fn parse_token_stream(
                                 .get_mut(&index)
                                 .ok_or_else(|| io::Error::other("unknown channel"))?;
 
-                            state.push(&delta);
+                            state.push(delta);
+
                             while let Some(next) = state.next()? {
                                 yield next;
                             }
@@ -46,10 +47,11 @@ pub fn parse_token_stream(
                                 .get_mut(&index)
                                 .ok_or_else(|| io::Error::other("unknown channel"))?;
 
-                            state.done()?;
+                            state.done();
                             while let Some(next) = state.next()? {
                                 yield next;
                             }
+                            state.assert_final_state()?;
                             response_states.remove(&index);
                         },
                     }
@@ -62,16 +64,17 @@ pub fn parse_token_stream(
         }
 
         for (_index, mut state) in response_states.drain() {
-            state.done()?;
+            state.done();
             while let Some(next) = state.next()? {
                 yield next;
             }
+            state.assert_final_state()?;
         }
     }
 }
 
 struct ResponseParser {
-    json_parser: JsonParser<PushJsonFeeder>,
+    json_parser: JsonParser<ChunkJsonFeeder>,
     state: State,
 }
 
@@ -103,11 +106,21 @@ enum MessageField {
 }
 
 impl ResponseParser {
-    fn push(&mut self, input: &str) {
-        self.json_parser.feeder.push_bytes(input.as_bytes());
+    fn push(&mut self, input: String) {
+        let feeder = &mut self.json_parser.feeder;
+        if feeder.has_input() {
+            feeder.chunk.push_str(&input);
+        } else {
+            feeder.pos = 0;
+            feeder.chunk = input;
+        }
     }
 
-    fn done(&mut self) -> io::Result<()> {
+    fn done(&mut self) {
+        self.json_parser.feeder.done = true;
+    }
+
+    fn assert_final_state(&self) -> io::Result<()> {
         if self.state != State::Done {
             // TODO: convert state to human-readable error message
             return Err(io::Error::new(
@@ -115,7 +128,6 @@ impl ResponseParser {
                 format!("unexpected end of stream (state: {:?})", self.state),
             ));
         }
-        self.json_parser.feeder.done();
         Ok(())
     }
 
@@ -248,8 +260,45 @@ impl ResponseParser {
 impl Default for ResponseParser {
     fn default() -> Self {
         Self {
-            json_parser: JsonParser::new(PushJsonFeeder::new()),
+            json_parser: JsonParser::new(ChunkJsonFeeder::new(String::new())),
             state: State::ExpectRootStart,
+        }
+    }
+}
+
+/// Custom json feeder, as the builtin PushJsonFeeder has a hard limit on buffer size.
+struct ChunkJsonFeeder {
+    chunk: String,
+    pos: usize,
+    done: bool,
+}
+
+impl ChunkJsonFeeder {
+    pub fn new(chunk: String) -> Self {
+        Self {
+            chunk,
+            pos: 0,
+            done: false,
+        }
+    }
+}
+
+impl JsonFeeder for ChunkJsonFeeder {
+    fn has_input(&self) -> bool {
+        self.pos < self.chunk.len()
+    }
+
+    fn is_done(&self) -> bool {
+        self.done
+    }
+
+    fn next_input(&mut self) -> Option<u8> {
+        if !self.has_input() {
+            None
+        } else {
+            let r = Some(self.chunk.as_bytes()[self.pos]);
+            self.pos += 1;
+            r
         }
     }
 }
