@@ -196,18 +196,12 @@ where
                 })
                 .collect::<Result<Vec<_>, ProviderError>>()?
                 .into_iter()
-                .flatten()
-                // Wrap the (first) system prompt.
-                .enumerate()
-                .map(|(i, entry)| match (i, entry) {
-                    (0, BranchEntry::System { id, message }) => BranchEntry::System {
-                        id,
-                        message: wrap_system_prompt(&message),
-                    },
-                    (_, other) => other,
-                });
+                .flatten();
 
-            req.set_branch(Branch::new(history)).set_schema(schema);
+            let system_prompt = wrap_system_prompt(req.system_prompt());
+            req.set_branch(Branch::new(history))
+                .set_schema(schema)
+                .set_system_prompt(system_prompt);
 
             Ok(req)
         };

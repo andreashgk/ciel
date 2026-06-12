@@ -64,12 +64,7 @@ pub async fn channel_worker(
         let mut branch = sessions
             .by_session_id(&session_identifier)
             .await?
-            .unwrap_or_else(|| {
-                Branch::new([BranchEntry::System {
-                    id: BranchId::new_from_current_time(),
-                    message: system_prompt.clone(),
-                }])
-            });
+            .unwrap_or_else(|| Branch::new([]));
 
         for event in events.drain(..) {
             let Event::MessageCreate(message_create) = &event else {
@@ -120,10 +115,13 @@ pub async fn channel_worker(
         while should_continue {
             should_continue = false;
 
+            let mut request = Request::from_branch(branch.clone());
+            request.set_system_prompt(system_prompt.clone());
+
             // TODO: properly handle this error by giving some feedback in the channel
             let service = chat.ready().await?;
             // TODO: properly handle this error by giving some feedback in the channel
-            let mut response_stream = service.call(Request::from_branch(branch.clone())).await?;
+            let mut response_stream = service.call(request).await?;
 
             let mut last_sent = None;
             // The bot simulates typing at 150 wpm.

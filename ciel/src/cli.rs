@@ -65,12 +65,7 @@ impl Cli {
                 .by_session_id(&session_identifier)
                 .await
                 .context("failed to fetch session")?
-                .unwrap_or_else(|| {
-                    Branch::new([BranchEntry::System {
-                        id: BranchId::new_from_current_time(),
-                        message: system_prompt.clone(),
-                    }])
-                });
+                .unwrap_or_else(|| Branch::new([]));
             branch.push(new_session_entry);
 
             // TODO: better way to do this
@@ -83,9 +78,12 @@ impl Cli {
             while should_continue {
                 should_continue = false;
 
+                let mut req = Request::from_branch(branch.clone());
+                req.set_system_prompt(system_prompt.clone());
+
                 let service = chat.ready().await?;
                 let mut response_stream = service
-                    .call(Request::from_branch(branch.clone()))
+                    .call(req)
                     .await
                     .context("failed to get LLM response")?;
 

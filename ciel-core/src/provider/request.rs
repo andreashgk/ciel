@@ -8,6 +8,7 @@ use crate::tool::ToolInfo;
 pub struct Request {
     provider: Option<String>,
     model: Option<String>,
+    system_prompt: String,
     branch: Branch,
     schema: Option<Arc<Schema>>,
     tool_definitions: Vec<Arc<ToolInfo>>,
@@ -26,6 +27,7 @@ impl Request {
         Self {
             provider: None,
             model: None,
+            system_prompt: String::new(),
             branch,
             schema: None,
             tool_definitions: Vec::new(),
@@ -43,6 +45,19 @@ impl Request {
 
     pub fn set_branch(&mut self, branch: Branch) -> &mut Self {
         self.branch = branch;
+        self
+    }
+
+    pub fn system_prompt(&self) -> &str {
+        &self.system_prompt
+    }
+
+    pub fn system_prompt_mut(&mut self) -> &mut String {
+        &mut self.system_prompt
+    }
+
+    pub fn set_system_prompt(&mut self, prompt: impl Into<String>) -> &mut Self {
+        self.system_prompt = prompt.into();
         self
     }
 

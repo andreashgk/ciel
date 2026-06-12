@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::io;
+use std::iter;
 use std::ops::Not;
 use std::sync::Arc;
 
@@ -100,58 +101,68 @@ impl ProviderImpl for OpenAI {
             .map_err(ProviderError::Config)?;
 
         // TODO: assistant messages and tool calls should maybe be merged?
-        let messages = request
-            .branch()
-            .iter()
-            .map(|entry| match entry {
-                BranchEntry::System { message, .. } => RequestMessage {
-                    name: None,
-                    role: "system",
-                    content: Some(message),
-                    tool_call_id: None,
-                    tool_calls: None,
+        let messages = iter::once(RequestMessage {
+            name: None,
+            role: "system",
+            content: Some(request.system_prompt()),
+            tool_calls: None,
+            tool_call_id: None,
+        })
+        // Don't include the system prompt if it is empty.
+        .skip(if request.system_prompt().is_empty() {
+            1
+        } else {
+            0
+        })
+        .chain(request.branch().iter().map(|entry| match entry {
+            BranchEntry::System { message, .. } => RequestMessage {
+                name: None,
+                role: "system",
+                content: Some(message),
+                tool_call_id: None,
+                tool_calls: None,
+            },
+            BranchEntry::Message { role, content, .. } => RequestMessage {
+                name: None,
+                role: match role {
+                    Role::Assistant => "assistant",
+                    Role::User => "user",
                 },
-                BranchEntry::Message { role, content, .. } => RequestMessage {
-                    name: None,
-                    role: match role {
-                        Role::Assistant => "assistant",
-                        Role::User => "user",
+                content: Some(content.as_str()),
+                tool_call_id: None,
+                tool_calls: None,
+            },
+            BranchEntry::Tool {
+                tool_call_id,
+                name,
+                arguments,
+                ..
+            } => RequestMessage {
+                name: None,
+                role: "assistant",
+                content: None,
+                tool_calls: Some(vec![RequestToolCall {
+                    id: tool_call_id.as_str(),
+                    tool: RequestToolCallType::Function {
+                        arguments: arguments.as_str(),
+                        name: name.as_str(),
                     },
-                    content: Some(content.as_str()),
-                    tool_call_id: None,
-                    tool_calls: None,
-                },
-                BranchEntry::Tool {
-                    tool_call_id,
-                    name,
-                    arguments,
-                    ..
-                } => RequestMessage {
-                    name: None,
-                    role: "assistant",
-                    content: None,
-                    tool_calls: Some(vec![RequestToolCall {
-                        id: tool_call_id.as_str(),
-                        tool: RequestToolCallType::Function {
-                            arguments: arguments.as_str(),
-                            name: name.as_str(),
-                        },
-                    }]),
-                    tool_call_id: None,
-                },
-                BranchEntry::ToolResult {
-                    tool_call_id,
-                    result,
-                    ..
-                } => RequestMessage {
-                    name: None,
-                    role: "tool",
-                    content: Some(result.as_str()),
-                    tool_calls: None,
-                    tool_call_id: Some(tool_call_id.as_str()),
-                },
-            })
-            .collect::<Vec<_>>();
+                }]),
+                tool_call_id: None,
+            },
+            BranchEntry::ToolResult {
+                tool_call_id,
+                result,
+                ..
+            } => RequestMessage {
+                name: None,
+                role: "tool",
+                content: Some(result.as_str()),
+                tool_calls: None,
+                tool_call_id: Some(tool_call_id.as_str()),
+            },
+        }))
+        .collect::<Vec<_>>();
 
         let tools = request
             .tools()
