@@ -1,5 +1,3 @@
-mod stream;
-
 use std::io;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -8,10 +6,6 @@ use ciel_core::provider;
 use ciel_core::provider::ProviderError;
 use ciel_core::provider::request::Request;
 use ciel_core::provider::response::ResponseEvent;
-use ciel_core::schema::ArrayRules;
-use ciel_core::schema::ObjectRules;
-use ciel_core::schema::Schema;
-use ciel_core::schema::StringRules;
 use ciel_core::session::branch::Branch;
 use ciel_core::session::branch::BranchEntry;
 use ciel_core::session::branch::UserInfo;
@@ -26,8 +20,6 @@ use time::format_description::parse_owned;
 use tower::Layer;
 use tower::Service;
 
-use crate::chat_adapter::stream::parse_token_stream;
-
 /// Chat layer on top of an LLM service, oriented for conversational text chats.
 ///
 /// This layer wrap around raw llm requests/responses to provide multi-user chat awareness, as well
@@ -35,63 +27,16 @@ use crate::chat_adapter::stream::parse_token_stream;
 #[derive(Clone)]
 pub struct ChatAdapterLayer<S> {
     pd: PhantomData<S>,
-    schema: Arc<Schema>,
     time_format: Arc<time::format_description::OwnedFormatItem>,
 }
 
 impl<S> Default for ChatAdapterLayer<S> {
     fn default() -> Self {
-        let schema = Schema::object(
-            ObjectRules::new()
-                .required_property(
-                    "_reasoning",
-                    Schema::string(StringRules::new()).description(
-                        "Internal thought process for why the bot \
-                        should or should not respond to the latest message(s).",
-                    ),
-                )
-                .required_property(
-                    "_should_respond",
-                    Schema::boolean().description(
-                        "Determines if the bot will send a response at all. \
-                        If false, no messages have to be specified. \
-                        This should be used when the conversation has ended, \
-                        no one is speaking to the bot, \
-                        or you feel you dont need to answer.",
-                    ),
-                )
-                .required_property(
-                    "messages",
-                    Schema::array(
-                        ArrayRules::new().items(Schema::object(
-                            ObjectRules::new()
-                                .required_property(
-                                    "_reasoning",
-                                    Schema::string(StringRules::new()).description(
-                                        "Internal thought process for formulating \
-                                        this specific message.",
-                                    ),
-                                )
-                                .required_property(
-                                    "message",
-                                    Schema::string(StringRules::new())
-                                        .description("The actual message content to be sent."),
-                                )
-                                .additional_properties(false),
-                        )),
-                    )
-                    .description("List of messages to send in the channel."),
-                )
-                .additional_properties(false),
-        )
-        .title("ChatResponse");
-
         let time_format = parse_owned::<2>("[year]-[month]-[day] [hour]:[minute]")
             .expect("valid time format at compile time");
 
         Self {
             pd: Default::default(),
-            schema: Arc::new(schema),
             time_format: Arc::new(time_format),
         }
     }
@@ -109,7 +54,6 @@ where
     fn layer(&self, inner: S) -> Self::Service {
         ChatAdapterService {
             inner,
-            schema: self.schema.clone(),
             time_format: self.time_format.clone(),
         }
     }
@@ -119,7 +63,6 @@ where
 #[derive(Clone)]
 pub struct ChatAdapterService<S> {
     inner: S,
-    schema: Arc<Schema>,
     time_format: Arc<time::format_description::OwnedFormatItem>,
 }
 
@@ -142,7 +85,6 @@ where
 
     fn call(&mut self, mut req: Request) -> Self::Future {
         let time_format = self.time_format.clone();
-        let schema = self.schema.clone();
 
         // Basically the equivalent of a `try` block to build the request, so it can be wrapped into
         // a future afterwards.
@@ -200,7 +142,6 @@ where
 
             let system_prompt = wrap_system_prompt(req.system_prompt());
             req.set_branch(Branch::new(history))
-                .set_schema(schema)
                 .set_system_prompt(system_prompt);
 
             Ok(req)
@@ -211,9 +152,6 @@ where
 
         async move {
             let response_stream = inner_future?.await?;
-            // TODO: apply instrument to this stream, maybe?
-            let response_stream = parse_token_stream(response_stream);
-
             Ok(response_stream.boxed())
         }
         .boxed()
