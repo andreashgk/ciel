@@ -41,6 +41,7 @@ use rootcause::Report;
 use serde::Deserialize;
 use serde_json::Number;
 use serde_json::Value;
+use tracing::debug;
 use uuid::Uuid;
 
 use crate::models::Error;
@@ -427,6 +428,14 @@ async fn determine_error(response: Response<Incoming>, model: &str) -> Report<Pr
         .await
         .map(|body| {
             let b = &body.to_bytes();
+
+            let b_str = str::from_utf8(b);
+            if let Ok(b_str) = b_str {
+                debug!("provider error: {b_str}");
+            } else {
+                debug!("provider error: {b:?}");
+            }
+
             serde_json::from_slice(b)
                 .unwrap_or_else(|why| {
                     Error {
