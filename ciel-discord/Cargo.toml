@@ -10,6 +10,7 @@ ciel-util.workspace = true
 futures-util.workspace = true
 rootcause.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 time.workspace = true
 tokio.workspace = true
 tower.workspace = true

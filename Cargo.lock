@@ -203,6 +203,7 @@ dependencies = [
  "futures-util",
  "rootcause",
  "serde",
+ "serde_json",
  "time",
  "tokio",
  "tower",

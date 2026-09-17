@@ -19,6 +19,7 @@ use ciel_util::queue_map::QueueMapReceiver;
 use futures_util::TryStreamExt;
 use rootcause::Report;
 use rootcause::option_ext::OptionExt;
+use serde::Deserialize;
 use time::OffsetDateTime;
 use tokio::time::Instant;
 use tokio::time::sleep_until;
@@ -217,14 +218,6 @@ pub async fn channel_worker(
                         }
                         should_continue = true;
 
-                        let tool_message = http
-                            .create_message(*receiver.key())
-                            .content(&format!("-# 🔸 {name} [PENDING]"))
-                            .await?
-                            .model()
-                            .await?;
-                        tool_messages.insert(tool_call_id.clone(), tool_message.id);
-
                         tools.insert(
                             index,
                             ToolState {
@@ -246,12 +239,40 @@ pub async fn channel_worker(
                             continue;
                         };
 
+                        #[derive(Debug, Deserialize)]
+                        struct Desc {
+                            description: String,
+                        }
+
+                        let ds: Option<Desc> = serde_json::from_str(&state.args).ok();
+                        let content = if let Some(ds) = ds.as_ref() {
+                            format!("-# 🔸 {}: {} [PENDING]", state.name, ds.description)
+                        } else {
+                            format!("-# 🔸 {} [PENDING]", state.name)
+                        };
+
                         branch.push(BranchEntry::Tool {
                             id: BranchId::new_from_current_time(),
-                            tool_call_id: state.id,
-                            name: state.name,
+                            tool_call_id: state.id.clone(),
+                            name: state.name.clone(),
                             arguments: state.args,
                         });
+
+                        let format_finished_message = move || {
+                            if let Some(ds) = ds {
+                                format!("-# 🔹 {}: {}", state.name, ds.description)
+                            } else {
+                                format!("-# 🔹 {}", state.name)
+                            }
+                        };
+
+                        let tool_message = http
+                            .create_message(*receiver.key())
+                            .content(&content)
+                            .await?
+                            .model()
+                            .await?;
+                        tool_messages.insert(state.id, (tool_message.id, format_finished_message));
                     }
                     ResponseEvent::ToolResult(ToolResultEvent::Start {
                         index,
@@ -309,10 +330,10 @@ pub async fn channel_worker(
                             result,
                         });
 
-                        if let Some(tool_message) = tool_message {
+                        if let Some((tool_message, format_finished_msg)) = tool_message {
                             let res = http
                                 .update_message(*receiver.key(), tool_message)
-                                .content(Some(&format!("-# 🔹 {}", state.name)))
+                                .content(Some(&format_finished_msg()))
                                 .await;
                             if let Err(err) = res {
                                 error!("could not update tool message: {err}");
