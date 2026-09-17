@@ -14,7 +14,6 @@ use ciel_util::secret::Secret;
 use futures_util::FutureExt;
 use futures_util::StreamExt;
 use futures_util::TryFutureExt;
-use serde::Deserialize;
 use tokio::select;
 use tokio::sync::Mutex;
 use tokio::sync::oneshot;
@@ -44,7 +43,6 @@ use crate::worker::channel_worker;
 pub struct Discord {
     token: Secret<String>,
     allowed_channels: HashSet<Id<ChannelMarker>>,
-    strings: Arc<Strings>,
     state: Mutex<Option<RunningState>>,
 }
 
@@ -54,9 +52,6 @@ impl Discord {
         let allowed_channels = config
             .read_optional::<HashSet<Id<ChannelMarker>>>("allowed-channels")?
             .unwrap_or_default();
-        let strings = config
-            .read_optional::<Strings>("strings")?
-            .unwrap_or_default();
 
         if allowed_channels.is_empty() {
             warn!("no channels configured in `allowed-channels`; all messages will be ignored");
@@ -65,18 +60,9 @@ impl Discord {
         Ok(Arc::new(Self {
             token,
             allowed_channels,
-            strings: Arc::new(strings),
             state: Default::default(),
         }))
     }
-}
-
-#[derive(Debug, Deserialize, Default)]
-struct Strings {
-    #[serde(rename = "tool.pending")]
-    tool_pending: Option<String>,
-    #[serde(rename = "tool.complete")]
-    tool_complete: Option<String>,
 }
 
 #[derive(Debug)]
@@ -99,8 +85,6 @@ impl GatewayImpl for Discord {
         let http = Arc::new(Client::builder().token(token.0.clone()).build());
         let current_user = http.current_user().await?;
         let current_user = current_user.model().await?;
-
-        let strings = self.strings.clone();
 
         let mut shard = Shard::new(
             ShardId::ONE,
@@ -164,7 +148,6 @@ impl GatewayImpl for Discord {
                         chat.clone(),
                         ctx.system_prompt().to_string(),
                         http.clone(),
-                        strings.clone(),
                     )
                     .map_err(|error| {
                             error!("error while processing channel: {error}");

@@ -33,15 +33,12 @@ use twilight_model::channel::message::AllowedMentions;
 use twilight_model::id::Id;
 use twilight_model::id::marker::ChannelMarker;
 
-use crate::Strings;
-
 pub async fn channel_worker(
     mut receiver: QueueMapReceiver<Id<ChannelMarker>, Event>,
     sessions: SessionStore,
     mut chat: impl Service<Request, Response = ResponseStream, Error = Report<ProviderError>>,
     system_prompt: String,
     http: Arc<Client>,
-    strings: Arc<Strings>,
 ) -> rootcause::Result<()> {
     let mut events = Vec::new();
     loop {
@@ -222,13 +219,7 @@ pub async fn channel_worker(
 
                         let tool_message = http
                             .create_message(*receiver.key())
-                            .content(
-                                &strings
-                                    .tool_pending
-                                    .as_deref()
-                                    .unwrap_or("-# tool pending: $NAME")
-                                    .replace("$NAME", &name),
-                            )
+                            .content(&format!("-# 🔸 {name} [PENDING]"))
                             .await?
                             .model()
                             .await?;
@@ -321,13 +312,7 @@ pub async fn channel_worker(
                         if let Some(tool_message) = tool_message {
                             let res = http
                                 .update_message(*receiver.key(), tool_message)
-                                .content(Some(
-                                    &strings
-                                        .tool_complete
-                                        .as_deref()
-                                        .unwrap_or("-# tool complete: $NAME")
-                                        .replace("$NAME", &state.name),
-                                ))
+                                .content(Some(&format!("-# 🔹 {}", state.name)))
                                 .await;
                             if let Err(err) = res {
                                 error!("could not update tool message: {err}");
