@@ -51,6 +51,12 @@ impl TerminalTool {
                         .description("The terminal command to execute."),
                 )
                 .required_property(
+                    "description",
+                    Schema::string(StringRules::new()).description(
+                        "A short, single-line description of what the command aims to do.",
+                    ),
+                )
+                .required_property(
                     "timeout_seconds",
                     Schema::union([
                         SchemaKind::Integer(
@@ -102,7 +108,7 @@ async fn do_tool(
     output: mpsc::Sender<String>,
 ) -> rootcause::Result<()> {
     let schema: ArgSchema = serde_json::from_str(args).context("failed to parse arguments")?;
-    debug!(command = %schema.command, "running command");
+    debug!(command = %schema.command, description = %schema.description, "running command");
 
     let timeout = schema
         .timeout_seconds
@@ -177,5 +183,6 @@ async fn do_tool(
 #[derive(Debug, Deserialize)]
 struct ArgSchema {
     command: String,
+    description: String,
     timeout_seconds: Option<u32>,
 }
