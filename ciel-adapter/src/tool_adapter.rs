@@ -14,6 +14,7 @@ use futures_core::Stream;
 use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
 use futures_util::TryStreamExt;
+use indexmap::IndexMap;
 use rootcause::Report;
 use tokio::pin;
 use tokio::sync::mpsc;
@@ -149,8 +150,8 @@ fn wrap_stream(
 ) -> impl Stream<Item = io::Result<ResponseEvent>> {
     try_stream! {
         pin!(stream);
-
-        let mut states = HashMap::new();
+        // Use an indexmap to ensure tool results arrive in the order they are called.
+        let mut states = IndexMap::new();
 
         while let Some(event) = stream.try_next().await? {
             match &event {
