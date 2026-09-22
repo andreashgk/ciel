@@ -1,10 +1,14 @@
+use std::collections::HashMap;
+use std::fmt::Write;
 use std::io;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
+use async_stream::try_stream;
 use ciel_core::provider;
 use ciel_core::provider::ProviderError;
 use ciel_core::provider::request::Request;
+use ciel_core::provider::response::MessageEvent;
 use ciel_core::provider::response::ResponseEvent;
 use ciel_core::session::branch::Branch;
 use ciel_core::session::branch::BranchEntry;
@@ -14,11 +18,15 @@ use futures_core::future::BoxFuture;
 use futures_core::stream::BoxStream;
 use futures_util::FutureExt;
 use futures_util::StreamExt;
+use futures_util::TryStreamExt;
 use rootcause::Report;
+use serde::Deserialize;
 use serde::Serialize;
 use time::format_description::parse_owned;
+use tokio::pin;
 use tower::Layer;
 use tower::Service;
+use tracing::debug;
 
 /// Chat layer on top of an LLM service, oriented for conversational text chats.
 ///
@@ -152,7 +160,58 @@ where
 
         async move {
             let response_stream = inner_future?.await?;
-            Ok(response_stream.boxed())
+
+            #[derive(Debug, Deserialize)]
+            struct JsonMsg {
+                content: String,
+            }
+            // This is a temporary hack to prevent the LLM from responding JSON because it gets
+            // confused by the context. In the long term there needs to be a better way to prevent
+            // this behaviour.
+            let s = try_stream! {
+                pin!(response_stream);
+
+                let mut channels = HashMap::new();
+
+                while let Some(next) = response_stream.try_next().await? {
+                    match next {
+                        ResponseEvent::Message(MessageEvent::Start { index }) => {
+                            yield ResponseEvent::Message(MessageEvent::Start { index });
+                            channels.insert(index, String::new());
+                        },
+                        ResponseEvent::Message(MessageEvent::Chunk { index, delta }) => {
+                            let Some(buf) = channels.get_mut(&index) else {
+                                continue;
+                            };
+                            buf.push_str(&delta);
+                        },
+                        ResponseEvent::Message(MessageEvent::Complete { index }) => {
+                            let Some(mut msg) = channels.remove(&index) else {
+                                continue;
+                            };
+
+                            let v: Result<Vec<JsonMsg>, _> = serde_json::from_str(&msg);
+                            if let Ok(value) = v && !value.is_empty() {
+                                debug!(msgs = value.len(), "LLM responded in json; parsed and unwrapped");
+
+                                msg = String::new();
+                                for v in value {
+                                    if msg.is_empty() {
+                                        msg = v.content;
+                                    } else {
+                                      _ = write!(msg, "\n{}", v.content);
+                                    }
+                                }
+                            }
+
+                            yield ResponseEvent::Message(MessageEvent::Chunk { index, delta: msg });
+                            yield ResponseEvent::Message(MessageEvent::Complete { index });
+                        },
+                        _ => yield next,
+                    }
+                }
+            };
+            Ok(ChatStream::from(s.boxed()))
         }
         .boxed()
     }
