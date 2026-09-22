@@ -132,6 +132,8 @@ pub struct EventChoice {
 
 #[derive(Debug, Deserialize)]
 pub struct EventDelta {
+    /// OpenRouter (and some other providers) send this as `reasoning` instead.
+    #[serde(alias = "reasoning")]
     pub reasoning_content: Option<String>,
     pub content: Option<String>,
     pub refusal: Option<String>,
